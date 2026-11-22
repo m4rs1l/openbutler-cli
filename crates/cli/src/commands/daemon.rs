@@ -12,6 +12,15 @@ use std::time::Duration;
 
 use crate::client::ClientError;
 use crate::{CliError, commands};
+use chrono::TimeZone;
+
+/// The payload `pair.create` answers with (the source's shape).
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct IssuedPair {
+    code: String,
+    expires_at: u64,
+}
 
 /// Poll interval while waiting for the host to leave the endpoint (the
 /// source polls `status` at 250 ms in `requireBackgroundHost`).
@@ -64,6 +73,29 @@ pub async fn stop(data_dir: &Path) -> Result<String, CliError> {
             });
         }
     }
+}
+
+/// `openbutler daemon pair` — mint one-time code a remote client
+/// redeems. The five-minute TTL lives daemon-side (`pair.create`), and
+/// the redeem command in the hint is the source's canonical form.
+pub async fn pair(data_dir: &Path) -> Result<String, CliError> {
+    let result = commands::ask(data_dir, "pair.create").await?;
+    let issued: IssuedPair = serde_json::from_value(result).map_err(|source| CliError::Decode {
+        action: "pair.create",
+        source,
+    })?;
+    // Local wall clock, the source's `toLocaleTimeString` equivalent;
+    // an unconvertible instant falls back to the raw milliseconds
+    // rather than a wrong zone.
+    let expires = chrono::Local
+        .timestamp_millis_opt(i64::try_from(issued.expires_at).unwrap_or(i64::MAX))
+        .single()
+        .map(|time| time.format("%H:%M:%S").to_string())
+        .unwrap_or_else(|| issued.expires_at.to_string());
+    Ok(format!(
+        "Pairing code: {}\nExpires:      {}\nRedeem it on the client within 5 minutes: openbutler connect <host:port> --code {}",
+        issued.code, expires, issued.code
+    ))
 }
 
 /// The host's status reduced to the pid the stop flow tracks.

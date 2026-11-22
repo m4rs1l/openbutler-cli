@@ -53,6 +53,8 @@ pub enum DaemonCommand {
     Status,
     /// Stop the background host gracefully.
     Stop,
+    /// Mint a one-time pairing code for a remote client.
+    Pair,
 }
 
 /// Runs one command and returns its rendered stdout text.
@@ -66,6 +68,7 @@ pub async fn execute(command: Command, data_dir: &std::path::Path) -> Result<Str
         Command::Daemon { command } => match command.unwrap_or(DaemonCommand::Status) {
             DaemonCommand::Status => commands::daemon::status(data_dir).await,
             DaemonCommand::Stop => commands::daemon::stop(data_dir).await,
+            DaemonCommand::Pair => commands::daemon::pair(data_dir).await,
         },
         // The buffered path (tests and callers without a terminal); the
         // binary streams a run straight to the real stdio.

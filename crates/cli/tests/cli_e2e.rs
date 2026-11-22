@@ -648,3 +648,37 @@ async fn daemon_stop_on_a_missing_host_is_a_normal_answer() {
     .unwrap();
     assert_eq!(text, "Background host is not running.");
 }
+
+#[tokio::test]
+async fn daemon_pair_mints_a_code_and_renders_the_redeem_hint() {
+    let dir = unique_dir("daemon-pair");
+    let steps = vec![Step {
+        action: "pair.create",
+        result: json!({ "code": "a1b2c3d4e5f6", "expiresAt": 1_763_778_000_000u64 }),
+        error: None,
+        events: Vec::new(),
+    }];
+    let _server = serve_steps(&dir, steps);
+
+    let text = execute(
+        Command::Daemon {
+            command: Some(DaemonCommand::Pair),
+        },
+        &dir,
+    )
+    .await
+    .unwrap();
+    let mut lines = text.lines();
+    assert_eq!(lines.next().unwrap(), "Pairing code: a1b2c3d4e5f6");
+    let expires = lines.next().unwrap();
+    // Local wall clock (TZ-dependent value): shape-pinned as HH:MM:SS.
+    assert!(expires.starts_with("Expires:"), "{expires}");
+    let clock = expires.trim_start_matches("Expires:").trim_start();
+    assert_eq!(clock.len(), 8, "{expires}");
+    assert_eq!(clock.matches(':').count(), 2, "{expires}");
+    assert_eq!(
+        lines.next().unwrap(),
+        "Redeem it on the client within 5 minutes: openbutler connect <host:port> --code a1b2c3d4e5f6"
+    );
+    assert_eq!(lines.next(), None);
+}

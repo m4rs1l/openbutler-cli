@@ -36,3 +36,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   because this build keeps no pid record. Three new pins (twelve e2e
   total), including a fake that leaves the endpoint once its script is
   fulfilled.
+- CLI slice S3: `openbutler daemon pair` mints through the host's
+  `pair.create` and renders the source's three lines (code, local
+  expiry clock via chrono, canonical redeem form). The redeem side
+  (saved remote backends) is deferred as its own slice; the owner
+  delegated the signature decision (2026-11-22). One new pin (thirteen
+  e2e total), shape-pinning the timezone-dependent expiry line.
