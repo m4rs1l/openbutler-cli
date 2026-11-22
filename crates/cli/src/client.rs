@@ -1,0 +1,152 @@
+//! The framed client: one connection, one request at a time.
+//!
+//! Frames, envelope shapes, and every validation rule come from
+//! `openbutler-protocol`; this module only owns transport (dialing the
+//! derived endpoint and moving bytes) and the correlation check the
+//! envelope does not perform on the client side (response id echoes the
+//! request id).
+
+use std::path::Path;
+
+use openbutler_protocol::endpoint::ResolvedEndpoint;
+use openbutler_protocol::{
+    DaemonEvent, DaemonRequest, DaemonResponse, FrameDecoder, MAX_DAEMON_FRAME_BYTES,
+    validate_response,
+};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+/// Transport failures with the context a human needs to act.
+#[derive(Debug, thiserror::Error)]
+pub enum ClientError {
+    /// Nothing is listening where this data directory points.
+    #[error("cannot connect to the daemon at {endpoint} — is it running? (data dir: {data_dir})")]
+    Unreachable {
+        endpoint: String,
+        data_dir: String,
+        #[source]
+        source: std::io::Error,
+    },
+    /// The socket spoke but the exchange failed.
+    #[error("daemon I/O failed: {0}")]
+    Io(#[from] std::io::Error),
+    /// A frame breached the contract cap or split badly.
+    #[error("daemon frame error: {0}")]
+    Frame(#[from] openbutler_protocol::FrameError),
+    /// A frame was not JSON.
+    #[error("daemon sent a frame that is not JSON")]
+    Json(#[from] serde_json::Error),
+    /// The response settled a different request (or arrived malformed).
+    #[error("daemon answered a different request id (expected {expected})")]
+    CorrelationMismatch { expected: String },
+    /// The response failed the envelope's own response gate.
+    #[error("daemon response violates the contract: {0}")]
+    Response(#[from] openbutler_protocol::ValidationError),
+}
+
+#[cfg(windows)]
+type Stream = tokio::net::windows::named_pipe::NamedPipeClient;
+#[cfg(not(windows))]
+type Stream = tokio::net::UnixStream;
+
+/// One live connection to the daemon.
+pub struct Client {
+    stream: Stream,
+    decoder: FrameDecoder,
+    buffer: Vec<u8>,
+    data_dir: String,
+    endpoint: String,
+}
+
+impl Client {
+    /// Dials the endpoint derived from `data_dir`.
+    pub async fn connect(data_dir: &Path) -> Result<Self, ClientError> {
+        let resolved = openbutler_protocol::endpoint::endpoint_for(data_dir);
+        let endpoint = resolved.socket_name();
+        let stream = dial(&resolved)
+            .await
+            .map_err(|source| ClientError::Unreachable {
+                endpoint: endpoint.clone(),
+                data_dir: data_dir.display().to_string(),
+                source,
+            })?;
+        Ok(Self {
+            stream,
+            decoder: FrameDecoder::new(MAX_DAEMON_FRAME_BYTES),
+            buffer: vec![0u8; 16 * 1024],
+            data_dir: data_dir.display().to_string(),
+            endpoint,
+        })
+    }
+
+    /// Sends one request and waits for its correlated response. Frames
+    /// that belong to the event lane are held for later attach work.
+    pub async fn call(&mut self, request: &DaemonRequest) -> Result<DaemonResponse, ClientError> {
+        let mut bytes = serde_json::to_vec(request)?;
+        bytes.push(b'\n');
+        self.stream.write_all(&bytes).await?;
+        loop {
+            let frame = match self.next_frame().await? {
+                Some(frame) => frame,
+                None => {
+                    return Err(ClientError::Io(std::io::Error::new(
+                        std::io::ErrorKind::UnexpectedEof,
+                        "daemon closed the connection before answering",
+                    )));
+                }
+            };
+            let value: serde_json::Value = serde_json::from_slice(&frame)?;
+            // The socket carries events too; S1 never subscribes, so an
+            // event here is contract-legal noise, not an answer.
+            if value.get("event").is_some() {
+                let _event: DaemonEvent = serde_json::from_value(value)?;
+                continue;
+            }
+            let response: DaemonResponse = serde_json::from_value(value)?;
+            if response.id() != request.id {
+                return Err(ClientError::CorrelationMismatch {
+                    expected: request.id.clone(),
+                });
+            }
+            validate_response(&response, request.version)?;
+            return Ok(response);
+        }
+    }
+
+    /// Reads until one complete frame is assembled.
+    async fn next_frame(&mut self) -> Result<Option<Vec<u8>>, ClientError> {
+        loop {
+            let read = self.stream.read(&mut self.buffer).await?;
+            if read == 0 {
+                // A pending frame may still be complete in the decoder.
+                let rest = self.decoder.append(&[])?;
+                return Ok(rest.into_iter().next());
+            }
+            let frames = self.decoder.append(&self.buffer[..read])?;
+            if let Some(frame) = frames.into_iter().next() {
+                return Ok(Some(frame));
+            }
+        }
+    }
+
+    /// Where this client dialed (error context for callers that need it).
+    pub fn endpoint(&self) -> &str {
+        &self.endpoint
+    }
+
+    /// The data directory this connection belongs to.
+    pub fn data_dir(&self) -> &str {
+        &self.data_dir
+    }
+}
+
+#[cfg(windows)]
+async fn dial(resolved: &ResolvedEndpoint) -> std::io::Result<Stream> {
+    // CreateFile itself proves the connection; no probe read (a zero-byte
+    // read would wait for readability the server can never send first).
+    tokio::net::windows::named_pipe::ClientOptions::new().open(resolved.socket_name())
+}
+
+#[cfg(not(windows))]
+async fn dial(resolved: &ResolvedEndpoint) -> std::io::Result<Stream> {
+    Stream::connect(resolved.socket_name()).await
+}

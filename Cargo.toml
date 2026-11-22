@@ -6,3 +6,20 @@ members = ["crates/cli"]
 version = "0.0.1"
 edition = "2024"
 license = "MIT"
+
+# Every dependency version is declared exactly once, here. Crates opt in with
+# `dep = { workspace = true }`.
+[workspace.dependencies]
+
+# Workspace-wide lints. Crates opt in with `[lints] workspace = true`.
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+
+# Dev builds keep backtrace line numbers without the full debuginfo payload
+# (house profile: line tables cut artifact size roughly in half).
+[profile.dev]
+debug = "line-tables-only"

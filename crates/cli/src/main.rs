@@ -1,5 +1,6 @@
-//! OpenButler command-line client: pairing, backends, and sessions.
+//! OpenButler command-line client: status, sessions, and (per slice) the
+//! rest of the surface.
 
-fn main() {
-    println!("openbutler-cli v{}", env!("CARGO_PKG_VERSION"));
+fn main() -> std::process::ExitCode {
+    openbutler_cli::main_entry()
 }
