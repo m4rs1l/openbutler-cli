@@ -3,6 +3,7 @@
 //! lives in [`ask`].
 
 pub mod daemon;
+pub mod logs;
 pub mod run;
 pub mod sessions;
 pub mod status;

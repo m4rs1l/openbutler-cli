@@ -742,3 +742,57 @@ async fn daemon_start_reports_a_missing_daemon_executable() {
         "{message}"
     );
 }
+
+// ------------------------------------------------- machine log (S3)
+
+#[tokio::test]
+async fn logs_tails_the_machine_log() {
+    let dir = unique_dir("logs-tail");
+    std::fs::create_dir_all(&dir).unwrap();
+    // CRLF like a Windows child writes.
+    std::fs::write(
+        dir.join("daemon.log"),
+        "one\r\ntwo\r\nthree\r\nfour\r\nfive\r\n",
+    )
+    .unwrap();
+
+    let text = execute(
+        Command::Logs {
+            lines: 3,
+            file: None,
+        },
+        &dir,
+    )
+    .await
+    .unwrap();
+    assert_eq!(text, "three\nfour\nfive");
+}
+
+#[tokio::test]
+async fn logs_on_a_missing_file_says_so() {
+    let dir = unique_dir("logs-missing");
+    let text = execute(
+        Command::Logs {
+            lines: 100,
+            file: None,
+        },
+        &dir,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        text,
+        format!("No log lines at {}.", dir.join("daemon.log").display())
+    );
+}
+
+#[test]
+fn logs_lines_range_is_clap_usage() {
+    use clap::Parser;
+    // The failure contract: argument problems are clap's own message
+    // (exit 2 in main), never a rendered log answer.
+    let error = openbutler_cli::Cli::try_parse_from(["openbutler", "logs", "--lines", "0"])
+        .expect_err("--lines 0 must not parse");
+    let text = error.to_string();
+    assert!(text.contains("invalid value '0' for '--lines"), "{text}");
+}

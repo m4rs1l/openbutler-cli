@@ -43,6 +43,15 @@ pub enum Command {
         #[command(subcommand)]
         command: Option<DaemonCommand>,
     },
+    /// Read the machine log's tail.
+    Logs {
+        /// How many tail lines to show.
+        #[arg(long, default_value_t = 100, value_parser = clap::value_parser!(u32).range(1..=100_000))]
+        lines: u32,
+        /// Read this file instead of the daemon's captured output.
+        #[arg(long)]
+        file: Option<std::path::PathBuf>,
+    },
 }
 
 /// `openbutler daemon` subcommands; bare `daemon` means `status`, the
@@ -73,6 +82,7 @@ pub async fn execute(command: Command, data_dir: &std::path::Path) -> Result<Str
             DaemonCommand::Pair => commands::daemon::pair(data_dir).await,
             DaemonCommand::Start => commands::daemon::start(data_dir).await,
         },
+        Command::Logs { lines, file } => commands::logs::run(data_dir, lines as usize, file).await,
         // The buffered path (tests and callers without a terminal); the
         // binary streams a run straight to the real stdio.
         Command::Run { request } => {

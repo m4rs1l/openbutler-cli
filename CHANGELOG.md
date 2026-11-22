@@ -55,3 +55,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   rule; readiness belongs in status) and no `--listen`/`--web` flags
   yet. Three new pins (sixteen e2e total): the active-host block, the
   death diagnosis, the missing-executable sentence.
+- CLI slice S3: `openbutler logs` tails the machine log by seeking
+  backwards (64 KB blocks until the newline count is covered — the
+  source read the whole file), with `--lines` (clap range 1..=100000)
+  and the source's `--file` override; a missing or unreadable file is
+  the empty answer. The default file is the `daemon.log` that
+  `daemon start` captures because this build's daemon writes no
+  structured `logs/openbutler.log` yet — level/event/`--json`
+  filtering is deferred with that daemon-side logger (documented).
+  Three new pins (nineteen e2e total): CRLF tailing, the missing-file
+  sentence, and clap's range rejection.
