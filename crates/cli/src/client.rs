@@ -38,6 +38,9 @@ pub enum ClientError {
     /// The response settled a different request (or arrived malformed).
     #[error("daemon answered a different request id (expected {expected})")]
     CorrelationMismatch { expected: String },
+    /// A response frame where only events belong (the run loop's lane).
+    #[error("daemon sent an unexpected response frame (id {id})")]
+    StrayResponse { id: String },
     /// The response failed the envelope's own response gate.
     #[error("daemon response violates the contract: {0}")]
     Response(#[from] openbutler_protocol::ValidationError),
@@ -79,8 +82,23 @@ impl Client {
     }
 
     /// Sends one request and waits for its correlated response. Frames
-    /// that belong to the event lane are held for later attach work.
+    /// that belong to the event lane are dropped — use
+    /// [`Self::call_with_events`] when a caller renders them.
     pub async fn call(&mut self, request: &DaemonRequest) -> Result<DaemonResponse, ClientError> {
+        self.call_with_events(request, |_| {}).await
+    }
+
+    /// Sends one request and waits for its correlated response, handing
+    /// every event frame on the same socket to `on_event` as it arrives
+    /// (the answer is correlated, events stream past it).
+    pub async fn call_with_events<F>(
+        &mut self,
+        request: &DaemonRequest,
+        mut on_event: F,
+    ) -> Result<DaemonResponse, ClientError>
+    where
+        F: FnMut(DaemonEvent),
+    {
         let mut bytes = serde_json::to_vec(request)?;
         bytes.push(b'\n');
         self.stream.write_all(&bytes).await?;
@@ -95,10 +113,9 @@ impl Client {
                 }
             };
             let value: serde_json::Value = serde_json::from_slice(&frame)?;
-            // The socket carries events too; S1 never subscribes, so an
-            // event here is contract-legal noise, not an answer.
             if value.get("event").is_some() {
-                let _event: DaemonEvent = serde_json::from_value(value)?;
+                let event: DaemonEvent = serde_json::from_value(value)?;
+                on_event(event);
                 continue;
             }
             let response: DaemonResponse = serde_json::from_value(value)?;
@@ -110,6 +127,29 @@ impl Client {
             validate_response(&response, request.version)?;
             return Ok(response);
         }
+    }
+
+    /// Reads the next event frame (the run loop's lane); a response here
+    /// is a protocol fault, EOF is an I/O fault. Timeout is the caller's
+    /// deadline, not this method's.
+    pub async fn next_event(&mut self) -> Result<DaemonEvent, ClientError> {
+        let frame = match self.next_frame().await? {
+            Some(frame) => frame,
+            None => {
+                return Err(ClientError::Io(std::io::Error::new(
+                    std::io::ErrorKind::UnexpectedEof,
+                    "daemon closed the connection mid-run",
+                )));
+            }
+        };
+        let value: serde_json::Value = serde_json::from_slice(&frame)?;
+        if value.get("event").is_some() {
+            return Ok(serde_json::from_value(value)?);
+        }
+        let response: DaemonResponse = serde_json::from_value(value)?;
+        Err(ClientError::StrayResponse {
+            id: response.id().to_owned(),
+        })
     }
 
     /// Reads until one complete frame is assembled.

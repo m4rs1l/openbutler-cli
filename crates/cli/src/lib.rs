@@ -8,6 +8,7 @@ pub mod client;
 pub mod commands;
 pub mod data_dir;
 
+use commands::run;
 use std::io::Write;
 
 use clap::Parser;
@@ -31,6 +32,12 @@ pub enum Command {
     Status,
     /// List saved sessions across workspaces.
     Sessions,
+    /// One-shot request: run it, print the answer, exit.
+    Run {
+        /// The request text for the agent.
+        #[arg(value_name = "REQUEST")]
+        request: String,
+    },
 }
 
 /// Runs one command and returns its rendered stdout text.
@@ -41,6 +48,18 @@ pub async fn execute(command: Command, data_dir: &std::path::Path) -> Result<Str
     match command {
         Command::Status => commands::status::run(data_dir).await,
         Command::Sessions => commands::sessions::run(data_dir).await,
+        // The buffered path (tests and callers without a terminal); the
+        // binary streams a run straight to the real stdio.
+        Command::Run { request } => {
+            let mut out = Vec::new();
+            let mut err = Vec::new();
+            run::run(data_dir, run::RunOptions::new(request), &mut out, &mut err).await?;
+            let mut text = String::from_utf8_lossy(&out).into_owned();
+            if !err.is_empty() {
+                text.push_str(&String::from_utf8_lossy(&err));
+            }
+            Ok(text)
+        }
     }
 }
 
@@ -61,6 +80,10 @@ pub enum CliError {
         #[source]
         source: serde_json::Error,
     },
+    /// A run stopped before it produced anything (the two source
+    /// deadline sentences, verbatim).
+    #[error("{0}")]
+    Run(String),
 }
 
 /// Parses real arguments, runs one command, prints, and picks the exit code:
@@ -86,11 +109,29 @@ pub fn main_entry() -> std::process::ExitCode {
             return std::process::ExitCode::from(1);
         }
     };
-    match runtime.block_on(execute(command, &data_dir::data_dir())) {
-        Ok(text) => {
-            println!("{text}");
-            std::process::ExitCode::SUCCESS
+    let outcome: Result<(), CliError> = runtime.block_on(async {
+        match command {
+            // A run streams live: stdout and stderr go straight through.
+            Command::Run { request } => {
+                let mut out = std::io::stdout();
+                let mut err = std::io::stderr();
+                run::run(
+                    &data_dir::data_dir(),
+                    run::RunOptions::new(request),
+                    &mut out,
+                    &mut err,
+                )
+                .await
+            }
+            other => {
+                let text = execute(other, &data_dir::data_dir()).await?;
+                println!("{text}");
+                Ok(())
+            }
         }
+    });
+    match outcome {
+        Ok(()) => std::process::ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("openbutler: {error}");
             std::process::ExitCode::from(1)
