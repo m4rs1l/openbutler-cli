@@ -28,3 +28,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   failure sentences are pinned. Three new end-to-end pins (nine total):
   byte-exact streaming stdout, the stall path, and the never-started
   path.
+- CLI slice S3 (first part): `openbutler daemon status` (bare `daemon`
+  defaults to it; shares the render authority with `status`) and
+  `openbutler daemon stop` — the host's own `stop` action, then a 250 ms
+  poll until the endpoint leaves; a missing host is a normal answer,
+  and the 30 s timeout returns the source's identity-refusal sentence
+  because this build keeps no pid record. Three new pins (twelve e2e
+  total), including a fake that leaves the endpoint once its script is
+  fulfilled.

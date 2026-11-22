@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-use openbutler_cli::{CliError, Command, execute};
+use openbutler_cli::{CliError, Command, DaemonCommand, execute};
 use openbutler_protocol::status::TelegramState;
 use openbutler_protocol::{
     DAEMON_PROTOCOL_VERSION, DaemonRequest, DaemonResponse, DaemonStatus, FrameDecoder,
@@ -270,6 +270,12 @@ fn serve_steps(dir: &Path, steps: Vec<Step>) -> tokio::task::JoinHandle<()> {
                     bytes.push(b'\n');
                     server.write_all(&bytes).await.unwrap();
                 }
+            }
+            // The script is the contract: once fulfilled the fake leaves
+            // the endpoint, which is how the stop flow observes a host
+            // that is actually gone.
+            if index == steps.len() {
+                break;
             }
         }
     })
@@ -547,4 +553,98 @@ async fn a_run_that_never_starts_fails_with_the_start_sentence() {
         error.to_string(),
         "The background host did not start the one-shot run."
     );
+}
+
+// ------------------------------------------------- daemon lifecycle (S3)
+
+fn status_fixture(pid: u32) -> Value {
+    let status = DaemonStatus {
+        pid,
+        started_at: "2026-11-22T02:00:00Z".to_owned(),
+        workspace_count: 1,
+        connected_clients: 2,
+        schedules: None,
+        telegram: None,
+        unresponsive: None,
+        entry: None,
+        build_id: None,
+    };
+    serde_json::to_value(&status).unwrap()
+}
+
+#[tokio::test]
+async fn daemon_status_defaults_to_the_status_report() {
+    // Bare `daemon` means `status` (the source's default) and both
+    // spellings share one render authority: identical text out.
+    let responder_for = || -> Responder {
+        Arc::new(|request| {
+            assert_eq!(request.action, "status");
+            success(request, status_fixture(77))
+        })
+    };
+    let bare_dir = unique_dir("daemon-status-bare");
+    let _bare_server = serve(&bare_dir, responder_for());
+    let bare = execute(Command::Daemon { command: None }, &bare_dir)
+        .await
+        .unwrap();
+
+    let named_dir = unique_dir("daemon-status-named");
+    let _named_server = serve(&named_dir, responder_for());
+    let named = execute(
+        Command::Daemon {
+            command: Some(DaemonCommand::Status),
+        },
+        &named_dir,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(bare, named);
+    assert!(bare.starts_with("pid:           77"), "{bare}");
+}
+
+#[tokio::test]
+async fn daemon_stop_asks_the_host_and_waits_for_the_endpoint() {
+    let dir = unique_dir("daemon-stop");
+    let steps = vec![
+        Step {
+            action: "status",
+            result: status_fixture(9001),
+            error: None,
+            events: Vec::new(),
+        },
+        Step {
+            action: "stop",
+            result: json!({ "stopping": true }),
+            error: None,
+            events: Vec::new(),
+        },
+    ];
+    // The fake leaves the endpoint after the script, so the stop flow
+    // observes a host that is genuinely gone rather than timing out.
+    let _server = serve_steps(&dir, steps);
+
+    let text = execute(
+        Command::Daemon {
+            command: Some(DaemonCommand::Stop),
+        },
+        &dir,
+    )
+    .await
+    .unwrap();
+    assert_eq!(text, "Background host stopped.");
+}
+
+#[tokio::test]
+async fn daemon_stop_on_a_missing_host_is_a_normal_answer() {
+    let dir = unique_dir("daemon-nostop");
+    let text = execute(
+        Command::Daemon {
+            command: Some(DaemonCommand::Stop),
+        },
+        &dir,
+    )
+    .await
+    .unwrap();
+    assert_eq!(text, "Background host is not running.");
 }

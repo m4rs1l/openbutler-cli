@@ -38,6 +38,21 @@ pub enum Command {
         #[arg(value_name = "REQUEST")]
         request: String,
     },
+    /// Background-host lifecycle: status and stop today, more to come.
+    Daemon {
+        #[command(subcommand)]
+        command: Option<DaemonCommand>,
+    },
+}
+
+/// `openbutler daemon` subcommands; bare `daemon` means `status`, the
+/// source's default.
+#[derive(Debug, Clone, clap::Subcommand)]
+pub enum DaemonCommand {
+    /// Show the running host and its report.
+    Status,
+    /// Stop the background host gracefully.
+    Stop,
 }
 
 /// Runs one command and returns its rendered stdout text.
@@ -48,6 +63,10 @@ pub async fn execute(command: Command, data_dir: &std::path::Path) -> Result<Str
     match command {
         Command::Status => commands::status::run(data_dir).await,
         Command::Sessions => commands::sessions::run(data_dir).await,
+        Command::Daemon { command } => match command.unwrap_or(DaemonCommand::Status) {
+            DaemonCommand::Status => commands::daemon::status(data_dir).await,
+            DaemonCommand::Stop => commands::daemon::stop(data_dir).await,
+        },
         // The buffered path (tests and callers without a terminal); the
         // binary streams a run straight to the real stdio.
         Command::Run { request } => {
@@ -84,6 +103,11 @@ pub enum CliError {
     /// deadline sentences, verbatim).
     #[error("{0}")]
     Run(String),
+    /// The host stayed on the endpoint past the stop window; this build
+    /// keeps no pid record, so its identity can never be verified and
+    /// it is never terminated blindly (source refusal, verbatim).
+    #[error("{0}")]
+    Stop(String),
 }
 
 /// Parses real arguments, runs one command, prints, and picks the exit code:
