@@ -11,6 +11,7 @@ workspace = true
 chrono = "0.4.45"
 clap = { version = "4.6.9", features = ["derive"] }
 openbutler-protocol = { git = "https://github.com/m4rs1l/openbutler-protocol", rev = "c6bb9d447f5411bb32af4e030131c5ea2b94cd3f", version = "0.0.1" }
+rusqlite = { version = "0.43", features = ["bundled"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 thiserror = "2.0.21"

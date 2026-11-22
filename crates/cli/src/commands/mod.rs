@@ -7,6 +7,7 @@ pub mod logs;
 pub mod run;
 pub mod sessions;
 pub mod status;
+pub mod usage;
 
 use std::path::Path;
 

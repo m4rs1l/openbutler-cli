@@ -52,6 +52,21 @@ pub enum Command {
         #[arg(long)]
         file: Option<std::path::PathBuf>,
     },
+    /// Show recorded token use and cost.
+    Usage {
+        /// Window length in days.
+        #[arg(long, default_value_t = 30, value_parser = clap::value_parser!(u32).range(1..=3650))]
+        days: u32,
+        /// Only rows of this session id.
+        #[arg(long)]
+        session: Option<String>,
+        /// Only rows of this provider/model (a bare provider also works).
+        #[arg(long)]
+        model: Option<String>,
+        /// Emit the machine-readable report instead of the render.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 /// `openbutler daemon` subcommands; bare `daemon` means `status`, the
@@ -83,6 +98,12 @@ pub async fn execute(command: Command, data_dir: &std::path::Path) -> Result<Str
             DaemonCommand::Start => commands::daemon::start(data_dir).await,
         },
         Command::Logs { lines, file } => commands::logs::run(data_dir, lines as usize, file).await,
+        Command::Usage {
+            days,
+            session,
+            model,
+            json,
+        } => commands::usage::run(data_dir, days, session, model, json).await,
         // The buffered path (tests and callers without a terminal); the
         // binary streams a run straight to the real stdio.
         Command::Run { request } => {

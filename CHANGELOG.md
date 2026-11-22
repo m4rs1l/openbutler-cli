@@ -65,3 +65,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   filtering is deferred with that daemon-side logger (documented).
   Three new pins (nineteen e2e total): CRLF tailing, the missing-file
   sentence, and clap's range rejection.
+- CLI slice S3: `openbutler usage` — the recorded spend as the source
+  renders it. The CLI opens the host's `state.db` read-only (the
+  source's contract: asking costs nothing and changes nothing; busy
+  timeout matches better-sqlite3's 5 s default) and ports
+  `usage/report.ts` faithfully: buckets keyed by each row's own
+  `tz_offset_min` (never this machine's clock), fresh-input split
+  (`no_cache_tokens ?? input - cache`), the summary with first-wins
+  busiest ties, UTC-walk streaks, cost-source classification, JS
+  `toFixed` rounding (multiply/round/divide in f64 first), and the
+  sparkline. `--days` is clap usage per the failure contract; a
+  missing ledger file is no rows, not an error. Four new pins
+  (twenty-three e2e total): the exact render with an offset-rollover
+  row, the empty sentence, the session/model scope, and the `--json`
+  envelope shape.
