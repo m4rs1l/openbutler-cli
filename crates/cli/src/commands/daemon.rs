@@ -28,6 +28,20 @@ const POLL: Duration = Duration::from_millis(250);
 /// The source's shutdown window; after it the source would verify the
 /// process identity before terminating, which this build cannot do.
 const STOP_TIMEOUT: Duration = Duration::from_secs(30);
+/// Boot deadline before a silent child is killed (the source's
+/// `DAEMON_START_TIMEOUT_MS`).
+const START_TIMEOUT: Duration = Duration::from_secs(20);
+/// Backoffs between spawn attempts when a child dies transiently (the
+/// source's `STARTUP_RETRY_BACKOFF_MS`: under memory pressure the first
+/// spawn can lose an allocation while a retry succeeds).
+const STARTUP_RETRY_BACKOFF_MS: [u64; 2] = [750, 2_000];
+
+/// A child that died during boot: the message is shown, and `retryable`
+/// is the source's transient/deterministic verdict.
+struct StartupFailure {
+    message: String,
+    retryable: bool,
+}
 
 /// `openbutler daemon status` — the host's report, as `status` renders it.
 pub async fn status(data_dir: &Path) -> Result<String, CliError> {
@@ -98,13 +112,299 @@ pub async fn pair(data_dir: &Path) -> Result<String, CliError> {
     ))
 }
 
+/// `openbutler daemon start` — spawn the host (or report the one that
+/// is already answering) and wait until its endpoint responds.
+///
+/// Divergences from the source, deliberate and listed: the
+/// `defaultModelReady` guard is a settings/key/catalog computation that
+/// belongs daemon-side (the owner's backend-owned rule) and this
+/// build's status carries no model field yet, so start does not
+/// pre-check; the `--listen`/`--web` flags and their settings writes
+/// land with their own slices.
+pub async fn start(data_dir: &Path) -> Result<String, CliError> {
+    let exe = resolve_daemon_exe()?;
+    start_with(data_dir, &exe).await
+}
+
+/// Start with an explicit executable — the test seam for the spawn
+/// paths (`main` goes through [`start`]'s resolution).
+pub async fn start_with(data_dir: &Path, exe: &Path) -> Result<String, CliError> {
+    // Already answering: the source returns the active host without
+    // spawning, then renders the same block.
+    let active = match status_report(data_dir).await {
+        Ok(status) => Some(status),
+        Err(CliError::Client(ClientError::Unreachable { .. })) => None,
+        Err(error) => return Err(error),
+    };
+    if let Some(status) = active {
+        return Ok(render_started(&status));
+    }
+    std::fs::create_dir_all(data_dir).map_err(|error| {
+        CliError::Start(format!(
+            "Could not prepare the data directory {}: {error}",
+            data_dir.display()
+        ))
+    })?;
+
+    let mut attempt_index = 0usize;
+    loop {
+        match spawn_and_wait(data_dir, exe).await {
+            Ok(()) => break,
+            Err(failure) => {
+                // The source retries only a transient failure while a
+                // backoff remains; anything else is the owner's answer.
+                let backoff = STARTUP_RETRY_BACKOFF_MS.get(attempt_index).copied();
+                match backoff {
+                    Some(milliseconds) if failure.retryable => {
+                        tokio::time::sleep(Duration::from_millis(milliseconds)).await;
+                        attempt_index += 1;
+                    }
+                    _ => return Err(CliError::Start(failure.message)),
+                }
+            }
+        }
+    }
+    // The source re-reads status after readiness; a host that answered
+    // the probe answers this too.
+    let status = status_report(data_dir).await?;
+    Ok(render_started(&status))
+}
+
+/// Spawn the child with `daemon.log` as its output, then poll: an early
+/// death is diagnosed with the log's own words, a silent child past the
+/// deadline is killed so a retry never races a half-started process for
+/// the endpoint.
+async fn spawn_and_wait(data_dir: &Path, exe: &Path) -> Result<(), StartupFailure> {
+    use std::process::Stdio;
+
+    let log_path = data_dir.join("daemon.log");
+    let log = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+        .map_err(|error| StartupFailure {
+            message: format!(
+                "Could not open the machine log {}: {error}",
+                log_path.display()
+            ),
+            retryable: false,
+        })?;
+    let log_offset = log.metadata().map(|meta| meta.len()).unwrap_or(0);
+    let stderr_handle = log.try_clone().map_err(|error| StartupFailure {
+        message: format!(
+            "Could not open the machine log {}: {error}",
+            log_path.display()
+        ),
+        retryable: false,
+    })?;
+
+    let mut command = std::process::Command::new(exe);
+    command
+        .arg("run")
+        .current_dir(data_dir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::from(log))
+        .stderr(Stdio::from(stderr_handle));
+    #[cfg(unix)]
+    command.process_group(0);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        // No console flash from a background host (the source's windowsHide).
+        command.creation_flags(0x0800_0000);
+    }
+    let mut child = command.spawn().map_err(|error| StartupFailure {
+        message: format!("Could not start the background host: {error}"),
+        retryable: false,
+    })?;
+
+    let deadline = tokio::time::Instant::now() + START_TIMEOUT;
+    loop {
+        if let Some(exit) = child.try_wait().map_err(|error| StartupFailure {
+            message: format!("Could not watch the background host: {error}"),
+            retryable: false,
+        })? {
+            let tail = log_tail(&log_path, log_offset);
+            return Err(diagnose("host", exit.code(), &tail, &log_path));
+        }
+        match status_report(data_dir).await {
+            Ok(_) => return Ok(()),
+            Err(CliError::Client(ClientError::Unreachable { .. })) => {}
+            Err(error) => {
+                return Err(StartupFailure {
+                    message: error.to_string(),
+                    retryable: false,
+                });
+            }
+        }
+        if tokio::time::Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            let tail = log_tail(&log_path, log_offset);
+            let mut message = format!(
+                "The host did not become ready within {} seconds.",
+                START_TIMEOUT.as_secs()
+            );
+            if !tail.is_empty() {
+                message.push('\n');
+                message.push_str(&tail);
+            }
+            return Err(StartupFailure {
+                message,
+                retryable: false,
+            });
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+}
+
+/// The source's early-death diagnosis: an allocation failure names the
+/// machine (and is retried), a fault that reproduces on every spawn is
+/// answered at once, everything else retries with backoff.
+fn diagnose(kind: &str, code: Option<i32>, tail: &str, log_path: &Path) -> StartupFailure {
+    let exit_label = match code {
+        Some(code) => format!("exit code {code}"),
+        None => "unknown signal".to_owned(),
+    };
+    let tail_block = if tail.is_empty() {
+        String::new()
+    } else {
+        format!("\n{tail}")
+    };
+    let lower = tail.to_ascii_lowercase();
+    let out_of_memory = lower.contains("memory allocation of")
+        || lower.contains("out of memory")
+        || lower.contains("cannot allocate memory")
+        || lower.contains("enomem")
+        || code == Some(134);
+    if out_of_memory {
+        return StartupFailure {
+            message: format!(
+                "The {kind} exited before becoming ready ({exit_label}): the machine ran out of memory. \
+                 Close other applications or enlarge the Windows pagefile, then start it again.{tail_block}"
+            ),
+            retryable: true,
+        };
+    }
+    // Source patterns for a Node child, adapted for this one: module and
+    // syntax faults cannot happen, a bind clash or a Rust panic can.
+    let deterministic = [
+        "address already in use",
+        "socket address",
+        "already running",
+        "panicked at",
+        "Usage:",
+        "is not recognized",
+    ]
+    .iter()
+    .any(|pattern| tail.contains(pattern));
+    let hint = if tail.is_empty() {
+        format!(
+            "\nRead the machine log for the child's own message: {}.",
+            log_path.display()
+        )
+    } else {
+        String::new()
+    };
+    StartupFailure {
+        message: format!(
+            "The {kind} exited before becoming ready ({exit_label}).{tail_block}{hint}"
+        ),
+        retryable: !deterministic,
+    }
+}
+
+/// The source's `readDaemonLogSince`: at most the last 4000 bytes past
+/// the spawn offset, trimmed, empty when the file cannot be read.
+fn log_tail(path: &Path, offset: u64) -> String {
+    use std::io::{Read, Seek, SeekFrom};
+    let Ok(mut file) = std::fs::File::open(path) else {
+        return String::new();
+    };
+    let Ok(meta) = file.metadata() else {
+        return String::new();
+    };
+    let size = meta.len();
+    let start = offset.max(size.saturating_sub(4_000));
+    let length = size - start;
+    if length == 0 || file.seek(SeekFrom::Start(start)).is_err() {
+        return String::new();
+    }
+    let mut buffer = Vec::new();
+    if file.take(length).read_to_end(&mut buffer).is_err() {
+        return String::new();
+    }
+    String::from_utf8_lossy(&buffer).trim().to_owned()
+}
+
+/// The daemon executable: `OPENBUTLER_DAEMON` first (dev and tests),
+/// then the install layout where both binaries sit side by side.
+fn resolve_daemon_exe() -> Result<std::path::PathBuf, CliError> {
+    if let Some(over) = std::env::var_os("OPENBUTLER_DAEMON") {
+        let path = std::path::PathBuf::from(over);
+        if path.is_file() {
+            return Ok(path);
+        }
+        return Err(CliError::Start(format!(
+            "OPENBUTLER_DAEMON points at {}, which is not a file.",
+            path.display()
+        )));
+    }
+    if let Ok(current) = std::env::current_exe()
+        && let Some(dir) = current.parent()
+    {
+        let mut name = std::ffi::OsString::from("openbutler-daemon");
+        #[cfg(windows)]
+        name.push(".exe");
+        let sibling = dir.join(name);
+        if sibling.is_file() {
+            return Ok(sibling);
+        }
+        return Err(CliError::Start(format!(
+            "Could not find the daemon executable next to {} (looked for {}). \
+             Set OPENBUTLER_DAEMON to its path.",
+            current.display(),
+            sibling.display()
+        )));
+    }
+    Err(CliError::Start(
+        "Could not locate the daemon executable; set OPENBUTLER_DAEMON to its path.".to_owned(),
+    ))
+}
+
+/// The start block: the source's lines, plain (this CLI has no color
+/// chrome); the `entry` line stays conditional on the daemon sending
+/// one (this daemon answers `entry: null`).
+fn render_started(status: &openbutler_protocol::DaemonStatus) -> String {
+    let mut text = String::new();
+    text.push_str(
+        "The machine custodian and its workspace runtime initialize when a TUI or Telegram turn arrives.",
+    );
+    text.push_str(&format!("\nBackground host running (pid {}).", status.pid));
+    text.push_str(&format!(
+        "\n{:<14} {}",
+        "workspaces:", status.workspace_count
+    ));
+    if let Some(entry) = &status.entry {
+        text.push_str(&format!("\n{:<14} {}", "entry:", entry));
+    }
+    text.push_str(
+        "\nIt stays alive after this terminal closes. Stop it with `openbutler daemon stop`.",
+    );
+    text
+}
+
+/// The host's status decoded (the render, the stop flow and the start
+/// readiness probe all speak through this).
+async fn status_report(data_dir: &Path) -> Result<openbutler_protocol::DaemonStatus, CliError> {
+    let result = commands::ask(data_dir, "status").await?;
+    serde_json::from_value(result).map_err(|source| CliError::Decode {
+        action: "status",
+        source,
+    })
+}
+
 /// The host's status reduced to the pid the stop flow tracks.
 async fn status_pid(data_dir: &Path) -> Result<u32, CliError> {
-    let result = commands::ask(data_dir, "status").await?;
-    let status: openbutler_protocol::DaemonStatus =
-        serde_json::from_value(result).map_err(|source| CliError::Decode {
-            action: "status",
-            source,
-        })?;
-    Ok(status.pid)
+    Ok(status_report(data_dir).await?.pid)
 }

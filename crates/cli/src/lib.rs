@@ -55,6 +55,8 @@ pub enum DaemonCommand {
     Stop,
     /// Mint a one-time pairing code for a remote client.
     Pair,
+    /// Start the background host (or report the running one).
+    Start,
 }
 
 /// Runs one command and returns its rendered stdout text.
@@ -69,6 +71,7 @@ pub async fn execute(command: Command, data_dir: &std::path::Path) -> Result<Str
             DaemonCommand::Status => commands::daemon::status(data_dir).await,
             DaemonCommand::Stop => commands::daemon::stop(data_dir).await,
             DaemonCommand::Pair => commands::daemon::pair(data_dir).await,
+            DaemonCommand::Start => commands::daemon::start(data_dir).await,
         },
         // The buffered path (tests and callers without a terminal); the
         // binary streams a run straight to the real stdio.
@@ -111,6 +114,10 @@ pub enum CliError {
     /// it is never terminated blindly (source refusal, verbatim).
     #[error("{0}")]
     Stop(String),
+    /// The host could not be spawned or died during boot (diagnosed
+    /// from the machine log's own words, source-style).
+    #[error("{0}")]
+    Start(String),
 }
 
 /// Parses real arguments, runs one command, prints, and picks the exit code:

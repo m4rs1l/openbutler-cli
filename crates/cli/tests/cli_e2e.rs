@@ -682,3 +682,63 @@ async fn daemon_pair_mints_a_code_and_renders_the_redeem_hint() {
     );
     assert_eq!(lines.next(), None);
 }
+
+#[tokio::test]
+async fn daemon_start_reports_the_running_host_without_spawning() {
+    let dir = unique_dir("daemon-start-active");
+    let responder: Responder = Arc::new(|request| {
+        assert_eq!(request.action, "status");
+        success(request, status_fixture(77))
+    });
+    let _server = serve(&dir, responder);
+
+    // Any executable: the running host must return before a spawn, so a
+    // spawn attempt would fail this test loudly.
+    let text =
+        openbutler_cli::commands::daemon::start_with(&dir, Path::new("definitely-unused.exe"))
+            .await
+            .unwrap();
+    assert_eq!(
+        text,
+        "The machine custodian and its workspace runtime initialize when a TUI or Telegram turn arrives.\n\
+         Background host running (pid 77).\n\
+         workspaces:    1\n\
+         It stays alive after this terminal closes. Stop it with `openbutler daemon stop`."
+    );
+}
+
+#[tokio::test]
+async fn daemon_start_diagnoses_a_child_that_died_before_ready() {
+    let dir = unique_dir("daemon-start-dead");
+    // `where run` finds nothing, writes its own message to the log, and
+    // exits — the diagnosis must quote that log and name the exit.
+    let where_exe = std::env::var_os("WINDIR")
+        .map(|windir| PathBuf::from(windir).join("System32").join("where.exe"))
+        .expect("WINDIR is set on Windows");
+    let error = openbutler_cli::commands::daemon::start_with(&dir, &where_exe)
+        .await
+        .expect_err("a dead child must fail the start");
+    let message = error.to_string();
+    assert!(
+        message.starts_with("The host exited before becoming ready (exit code "),
+        "{message}"
+    );
+    assert!(
+        !dir.join("daemon.log").metadata().is_err(),
+        "the log exists"
+    );
+}
+
+#[tokio::test]
+async fn daemon_start_reports_a_missing_daemon_executable() {
+    let dir = unique_dir("daemon-start-missing");
+    let missing = dir.join("no-such-daemon.exe");
+    let error = openbutler_cli::commands::daemon::start_with(&dir, &missing)
+        .await
+        .expect_err("a missing executable must fail the start");
+    let message = error.to_string();
+    assert!(
+        message.starts_with("Could not start the background host: "),
+        "{message}"
+    );
+}

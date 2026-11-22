@@ -42,3 +42,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (saved remote backends) is deferred as its own slice; the owner
   delegated the signature decision (2026-11-22). One new pin (thirteen
   e2e total), shape-pinning the timezone-dependent expiry line.
+- CLI slice S3: `openbutler daemon start` — spawn-or-report over the
+  pipe: an active host returns the start block untouched; otherwise the
+  executable resolves (`OPENBUTLER_DAEMON` then the sibling layout),
+  spawns `run` with `daemon.log` as output, and polls status at 250 ms
+  against a 20 s deadline with a kill on timeout. Early death is
+  diagnosed from the log tail (4000-byte window, source `readDaemonLogSince`
+  semantics): OOM sentences retry with the source's 750/2000 ms backoff,
+  deterministic faults (bind clash, panic, bad invocation) answer at
+  once, empty tails point at the log file. Deliberate divergences are
+  listed in the command doc: no model-readiness pre-check (backend-owned
+  rule; readiness belongs in status) and no `--listen`/`--web` flags
+  yet. Three new pins (sixteen e2e total): the active-host block, the
+  death diagnosis, the missing-executable sentence.
