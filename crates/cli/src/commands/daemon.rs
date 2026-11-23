@@ -225,7 +225,7 @@ async fn spawn_and_wait(data_dir: &Path, exe: &Path) -> Result<(), StartupFailur
             retryable: false,
         })? {
             let tail = log_tail(&log_path, log_offset);
-            return Err(diagnose("host", exit.code(), &tail, &log_path));
+            return Err(diagnose("host", exit.code(), &tail));
         }
         match status_report(data_dir).await {
             Ok(_) => return Ok(()),
@@ -261,7 +261,7 @@ async fn spawn_and_wait(data_dir: &Path, exe: &Path) -> Result<(), StartupFailur
 /// The source's early-death diagnosis: an allocation failure names the
 /// machine (and is retried), a fault that reproduces on every spawn is
 /// answered at once, everything else retries with backoff.
-fn diagnose(kind: &str, code: Option<i32>, tail: &str, log_path: &Path) -> StartupFailure {
+fn diagnose(kind: &str, code: Option<i32>, tail: &str) -> StartupFailure {
     let exit_label = match code {
         Some(code) => format!("exit code {code}"),
         None => "unknown signal".to_owned(),
@@ -299,10 +299,9 @@ fn diagnose(kind: &str, code: Option<i32>, tail: &str, log_path: &Path) -> Start
     .iter()
     .any(|pattern| tail.contains(pattern));
     let hint = if tail.is_empty() {
-        format!(
-            "\nRead the machine log for the child's own message: {}.",
-            log_path.display()
-        )
+        // The source's sentence, and now literally true: `logs` ships
+        // in this CLI (it reads the very file the tail came from).
+        "\nRead the machine log for the child's own message: openbutler logs --lines 40.".to_owned()
     } else {
         String::new()
     };
