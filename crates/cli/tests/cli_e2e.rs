@@ -694,10 +694,14 @@ async fn daemon_start_reports_the_running_host_without_spawning() {
 
     // Any executable: the running host must return before a spawn, so a
     // spawn attempt would fail this test loudly.
-    let text =
-        openbutler_cli::commands::daemon::start_with(&dir, Path::new("definitely-unused.exe"))
-            .await
-            .unwrap();
+    let text = openbutler_cli::commands::daemon::start_with(
+        &dir,
+        Path::new("definitely-unused.exe"),
+        None,
+        false,
+    )
+    .await
+    .unwrap();
     assert_eq!(
         text,
         "The machine custodian and its workspace runtime initialize when a TUI or Telegram turn arrives.\n\
@@ -715,7 +719,7 @@ async fn daemon_start_diagnoses_a_child_that_died_before_ready() {
     let where_exe = std::env::var_os("WINDIR")
         .map(|windir| PathBuf::from(windir).join("System32").join("where.exe"))
         .expect("WINDIR is set on Windows");
-    let error = openbutler_cli::commands::daemon::start_with(&dir, &where_exe)
+    let error = openbutler_cli::commands::daemon::start_with(&dir, &where_exe, None, false)
         .await
         .expect_err("a dead child must fail the start");
     let message = error.to_string();
@@ -733,7 +737,7 @@ async fn daemon_start_diagnoses_a_child_that_died_before_ready() {
 async fn daemon_start_reports_a_missing_daemon_executable() {
     let dir = unique_dir("daemon-start-missing");
     let missing = dir.join("no-such-daemon.exe");
-    let error = openbutler_cli::commands::daemon::start_with(&dir, &missing)
+    let error = openbutler_cli::commands::daemon::start_with(&dir, &missing, None, false)
         .await
         .expect_err("a missing executable must fail the start");
     let message = error.to_string();
@@ -1247,4 +1251,95 @@ async fn config_surfaces_the_daemons_refusal_sentence() {
     let error = execute(Command::Config, &dir).await.unwrap_err();
     assert!(matches!(error, CliError::Answer(_)));
     assert_eq!(error.to_string(), "settings are not loaded");
+}
+
+/// A host that is already up: the preference is persisted through the
+/// daemon and the source's two lines follow the block.
+#[tokio::test]
+async fn daemon_start_persists_the_listener_through_the_daemon() {
+    let dir = unique_dir("start-listen");
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let recorder = Arc::clone(&seen);
+    let responder: Responder = Arc::new(move |request| match request.action.as_str() {
+        "status" => success(
+            request,
+            json!({
+                "pid": 9,
+                "startedAt": "2026-11-23T20:00:00Z",
+                "workspaceCount": 1,
+                "connectedClients": 1,
+            }),
+        ),
+        "settings.set-listen" => {
+            recorder.lock().unwrap().push(request.payload.clone());
+            success(request, json!({ "listen": "100.64.0.5:45280" }))
+        }
+        other => panic!("unexpected action {other}"),
+    });
+    let _server = serve(&dir, responder);
+
+    let text = openbutler_cli::commands::daemon::start_with(
+        &dir,
+        Path::new("definitely-unused.exe"),
+        Some("100.64.0.5:45280".to_owned()),
+        false,
+    )
+    .await
+    .unwrap();
+    let expected =
+        openbutler_cli::ui::kv("Listener", "100.64.0.5:45280 (remote clients attach here)");
+    assert!(text.contains(&expected), "{text}");
+    assert!(
+        text.contains("The saved listener applies on the next `openbutler restart`."),
+        "{text}"
+    );
+    let payloads = seen.lock().unwrap();
+    assert_eq!(payloads.len(), 1, "one write per start");
+    assert_eq!(payloads[0]["listen"], "100.64.0.5:45280");
+}
+
+/// `--no-listen` clears the preference through the same action and says so
+/// in the source's words.
+#[tokio::test]
+async fn daemon_start_no_listen_clears_the_preference() {
+    let dir = unique_dir("start-nolisten");
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let recorder = Arc::clone(&seen);
+    let responder: Responder = Arc::new(move |request| match request.action.as_str() {
+        "status" => success(
+            request,
+            json!({
+                "pid": 9,
+                "startedAt": "2026-11-23T20:00:00Z",
+                "workspaceCount": 1,
+                "connectedClients": 1,
+            }),
+        ),
+        "settings.set-listen" => {
+            recorder.lock().unwrap().push(request.payload.clone());
+            success(request, json!({ "listen": null }))
+        }
+        other => panic!("unexpected action {other}"),
+    });
+    let _server = serve(&dir, responder);
+
+    let text = openbutler_cli::commands::daemon::start_with(
+        &dir,
+        Path::new("definitely-unused.exe"),
+        None,
+        true,
+    )
+    .await
+    .unwrap();
+    assert!(
+        text.contains("Remote listener cleared; this host binds no listener."),
+        "{text}"
+    );
+    assert!(
+        !text.contains("Listener "),
+        "a cleared listener prints no listener line: {text}"
+    );
+    let payloads = seen.lock().unwrap();
+    assert_eq!(payloads.len(), 1);
+    assert!(payloads[0]["listen"].is_null());
 }

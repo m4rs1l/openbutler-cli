@@ -15,6 +15,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- `openbutler daemon start --listen HOST:PORT` / `--no-listen` — the
+  remote listener preference. The write is the daemon's
+  (`settings.set-listen`, validated by the rule the host binds by): a cold
+  start passes the flag to the child and persists it once the host
+  answers, a running host persists and says the source's line
+  (`The saved listener applies on the next `openbutler restart`.`, exit
+  0). `--no-listen` clears it and prints the source's cleared note. Both
+  halves pinned end to end against the fake daemon (payload + rendered
+  lines).
+
 - `openbutler config` — the manager screen, rendered entirely from the
   daemon's `config.report`: MCP servers, default workspace, approval-mode
   label, the provider table (stored order, kind, keys, tool counts, the

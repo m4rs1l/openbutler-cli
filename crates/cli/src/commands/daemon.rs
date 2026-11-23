@@ -121,23 +121,35 @@ pub async fn pair(data_dir: &Path) -> Result<String, CliError> {
 /// build's status carries no model field yet, so start does not
 /// pre-check; the `--listen`/`--web` flags and their settings writes
 /// land with their own slices.
-pub async fn start(data_dir: &Path) -> Result<String, CliError> {
+pub async fn start(
+    data_dir: &Path,
+    listen: Option<String>,
+    no_listen: bool,
+) -> Result<String, CliError> {
     let exe = resolve_daemon_exe()?;
-    start_with(data_dir, &exe).await
+    start_with(data_dir, &exe, listen, no_listen).await
 }
 
 /// Start with an explicit executable — the test seam for the spawn
 /// paths (`main` goes through [`start`]'s resolution).
-pub async fn start_with(data_dir: &Path, exe: &Path) -> Result<String, CliError> {
-    // Already answering: the source returns the active host without
-    // spawning, then renders the same block.
-    let active = match status_report(data_dir).await {
-        Ok(status) => Some(status),
-        Err(CliError::Client(ClientError::Unreachable { .. })) => None,
-        Err(error) => return Err(error),
+pub async fn start_with(
+    data_dir: &Path,
+    exe: &Path,
+    listen: Option<String>,
+    no_listen: bool,
+) -> Result<String, CliError> {
+    // One connection carries the whole start: the probe and the write.
+    // The source could probe and write without a host (its files were the
+    // CLI's); here both are the daemon's, so a single socket does the run.
+    let connected = match crate::client::Client::connect(data_dir).await {
+        Ok(client) => Some(client),
+        Err(ClientError::Unreachable { .. }) => None,
+        Err(error) => return Err(CliError::Client(error)),
     };
-    if let Some(status) = active {
-        return Ok(render_started(&status));
+    if let Some(mut client) = connected {
+        let status = decode_status(call_on(&mut client, "status", None).await?)?;
+        let saved = persist_listen_on(&mut client, listen.as_deref(), no_listen).await?;
+        return Ok(render_started(&status, saved.as_deref(), no_listen, true));
     }
     std::fs::create_dir_all(data_dir).map_err(|error| {
         CliError::Start(format!(
@@ -148,7 +160,7 @@ pub async fn start_with(data_dir: &Path, exe: &Path) -> Result<String, CliError>
 
     let mut attempt_index = 0usize;
     loop {
-        match spawn_and_wait(data_dir, exe).await {
+        match spawn_and_wait(data_dir, exe, listen.as_deref(), no_listen).await {
             Ok(()) => break,
             Err(failure) => {
                 // The source retries only a transient failure while a
@@ -165,16 +177,71 @@ pub async fn start_with(data_dir: &Path, exe: &Path) -> Result<String, CliError>
         }
     }
     // The source re-reads status after readiness; a host that answered
-    // the probe answers this too.
-    let status = status_report(data_dir).await?;
-    Ok(render_started(&status))
+    // the probe answers this too. The cold-start flags reached the child
+    // directly, and the same value is now the saved preference so every
+    // later boot binds it as well (the source persisted before spawning;
+    // the write is the daemon's here, so it lands once the host answers).
+    let mut client = crate::client::Client::connect(data_dir).await?;
+    let status = decode_status(call_on(&mut client, "status", None).await?)?;
+    let saved = persist_listen_on(&mut client, listen.as_deref(), no_listen).await?;
+    Ok(render_started(&status, saved.as_deref(), no_listen, false))
+}
+
+/// One request on an open connection, answered as the daemon's payload.
+async fn call_on(
+    client: &mut crate::client::Client,
+    action: &str,
+    payload: Option<(&str, serde_json::Value)>,
+) -> Result<serde_json::Value, CliError> {
+    let mut request =
+        openbutler_protocol::DaemonRequest::new(uuid::Uuid::new_v4().to_string(), action);
+    if let Some((key, value)) = payload {
+        request.payload.insert(key.to_owned(), value);
+    }
+    match client.call(&request).await? {
+        openbutler_protocol::DaemonResponse::Success { result, .. } => Ok(result),
+        openbutler_protocol::DaemonResponse::Failure { error, .. } => Err(CliError::Answer(error)),
+    }
+}
+
+fn decode_status(result: serde_json::Value) -> Result<openbutler_protocol::DaemonStatus, CliError> {
+    serde_json::from_value(result).map_err(|source| CliError::Decode {
+        action: "status",
+        source,
+    })
+}
+
+/// Saves or clears the listener on an open connection and answers the
+/// stored value (`None` when nothing was persisted this run).
+async fn persist_listen_on(
+    client: &mut crate::client::Client,
+    listen: Option<&str>,
+    clear: bool,
+) -> Result<Option<String>, CliError> {
+    if listen.is_none() && !clear {
+        return Ok(None);
+    }
+    let payload = match listen {
+        Some(spec) => serde_json::json!(spec),
+        None => serde_json::Value::Null,
+    };
+    let result = call_on(client, "settings.set-listen", Some(("listen", payload))).await?;
+    Ok(result
+        .get("listen")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned))
 }
 
 /// Spawn the child with `daemon.log` as its output, then poll: an early
 /// death is diagnosed with the log's own words, a silent child past the
 /// deadline is killed so a retry never races a half-started process for
 /// the endpoint.
-async fn spawn_and_wait(data_dir: &Path, exe: &Path) -> Result<(), StartupFailure> {
+async fn spawn_and_wait(
+    data_dir: &Path,
+    exe: &Path,
+    listen: Option<&str>,
+    no_listen: bool,
+) -> Result<(), StartupFailure> {
     use std::process::Stdio;
 
     let log_path = data_dir.join("daemon.log");
@@ -205,6 +272,14 @@ async fn spawn_and_wait(data_dir: &Path, exe: &Path) -> Result<(), StartupFailur
         .stdin(Stdio::null())
         .stdout(Stdio::from(log))
         .stderr(Stdio::from(stderr_handle));
+    // The cold-start preference goes straight to the child: the host's
+    // write-only state is the daemon's, so the flag cannot be persisted
+    // before the host exists.
+    if let Some(spec) = listen {
+        command.arg("--listen").arg(spec);
+    } else if no_listen {
+        command.arg("--no-listen");
+    }
     #[cfg(unix)]
     command.process_group(0);
     #[cfg(windows)]
@@ -374,7 +449,12 @@ fn resolve_daemon_exe() -> Result<std::path::PathBuf, CliError> {
 /// The start block: the source's lines, plain (this CLI has no color
 /// chrome); the `entry` line stays conditional on the daemon sending
 /// one (this daemon answers `entry: null`).
-fn render_started(status: &openbutler_protocol::DaemonStatus) -> String {
+fn render_started(
+    status: &openbutler_protocol::DaemonStatus,
+    listener: Option<&str>,
+    cleared: bool,
+    was_running: bool,
+) -> String {
     let mut text = String::new();
     text.push_str(
         "The machine custodian and its workspace runtime initialize when a TUI or Telegram turn arrives.",
@@ -386,6 +466,26 @@ fn render_started(status: &openbutler_protocol::DaemonStatus) -> String {
     ));
     if let Some(entry) = &status.entry {
         text.push_str(&format!("\n{:<14} {}", "entry:", entry));
+    }
+    // The source's positions (L1806-1810): the saved listener, the restart
+    // note when the host was already up, then the cleared note.
+    if let Some(spec) = listener {
+        text.push_str(&format!(
+            "\n{}",
+            crate::ui::kv("Listener", &format!("{spec} (remote clients attach here)"))
+        ));
+        if was_running {
+            text.push_str(&format!(
+                "\n{}",
+                crate::ui::info("The saved listener applies on the next `openbutler restart`.")
+            ));
+        }
+    }
+    if cleared {
+        text.push_str(&format!(
+            "\n{}",
+            crate::ui::info("Remote listener cleared; this host binds no listener.")
+        ));
     }
     text.push_str(
         "\nIt stays alive after this terminal closes. Stop it with `openbutler daemon stop`.",
