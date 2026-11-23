@@ -15,6 +15,20 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- `openbutler tui` — the interactive session (ratatui + crossterm, slim
+  first). Three parts with one job each: `tui::model` decides (pure —
+  keys, intents, patch application), `tui::render` draws (pinned through
+  ratatui's `TestBackend`), and `tui` owns the terminal and the socket.
+  The screen opens on the saved-session list and never attaches or creates
+  a chat by itself (the no-default-session ruling); a chat streams frames
+  into the transcript, answers approvals with `y`/`n` and questions with
+  the input line, and drops frames that belong to another chat. A
+  non-terminal caller gets the refusal sentence before any terminal is
+  touched. Pins: seven model tests (snapshot open, delta append + text
+  continuation, approval keys, question answers and dismissal, the list
+  never opening a chat, selection clamping), four render tests, the
+  terminal guard and one end-to-end refusal through the command tree.
+
 - `openbutler daemon start --listen HOST:PORT` / `--no-listen` — the
   remote listener preference. The write is the daemon's
   (`settings.set-listen`, validated by the rule the host binds by): a cold

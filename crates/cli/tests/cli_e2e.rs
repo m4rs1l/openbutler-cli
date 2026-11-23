@@ -1343,3 +1343,17 @@ async fn daemon_start_no_listen_clears_the_preference() {
     assert_eq!(payloads.len(), 1);
     assert!(payloads[0]["listen"].is_null());
 }
+
+/// `openbutler tui` refuses without a terminal before touching one, and the
+/// refusal is the command's own sentence (no half-open alternate screen).
+#[tokio::test]
+async fn tui_refuses_without_a_terminal() {
+    let dir = unique_dir("tui-guard");
+    let error = execute(Command::Tui, &dir).await.unwrap_err();
+    match error {
+        CliError::Answer(message) => {
+            assert_eq!(message, openbutler_cli::tui::TTY_REFUSAL);
+        }
+        other => panic!("expected the terminal refusal, got {other:?}"),
+    }
+}
