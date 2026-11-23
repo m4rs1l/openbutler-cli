@@ -5,6 +5,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- The installed binary is `openbutler` (`[[bin]] name` — the package
+  keeps the repo name), and the default data directory mirrors the
+  daemon's `openbutler-daemon` rule: the CLI and the host resolve the
+  same directory, and neither touches the legacy Node install's
+  `openbutler` data.
+
+## [Unreleased]
+
 ### Added
 
 - CLI slice S1: `openbutler status` and `openbutler sessions` over the

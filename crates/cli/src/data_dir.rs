@@ -24,21 +24,21 @@ fn default_data_dir() -> PathBuf {
         let base = std::env::var_os("LOCALAPPDATA")
             .map(PathBuf::from)
             .unwrap_or_else(|| home_dir().join("AppData").join("Local"));
-        base.join("openbutler")
+        base.join("openbutler-daemon")
     }
     #[cfg(target_os = "macos")]
     {
         home_dir()
             .join("Library")
             .join("Application Support")
-            .join("openbutler")
+            .join("openbutler-daemon")
     }
     #[cfg(not(any(windows, target_os = "macos")))]
     {
         let base = std::env::var_os("XDG_DATA_HOME")
             .map(PathBuf::from)
             .unwrap_or_else(|| home_dir().join(".local").join("share"));
-        base.join("openbutler")
+        base.join("openbutler-daemon")
     }
 }
 
