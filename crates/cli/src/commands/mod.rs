@@ -6,6 +6,7 @@ pub mod daemon;
 pub mod logs;
 pub mod run;
 pub mod sessions;
+pub mod setup;
 pub mod status;
 pub mod usage;
 

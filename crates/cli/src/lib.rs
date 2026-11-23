@@ -67,6 +67,8 @@ pub enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// First-run setup wizard (interactive).
+    Setup,
 }
 
 /// `openbutler daemon` subcommands; bare `daemon` means `status`, the
@@ -104,6 +106,10 @@ pub async fn execute(command: Command, data_dir: &std::path::Path) -> Result<Str
             model,
             json,
         } => commands::usage::run(data_dir, days, session, model, json).await,
+        // The wizard writes to the real terminal as it goes; through this
+        // buffered path the guard fires first, so a non-terminal caller
+        // gets the refusal sentence and no prompts.
+        Command::Setup => commands::setup::run(data_dir).await.map(|()| String::new()),
         // The buffered path (tests and callers without a terminal); the
         // binary streams a run straight to the real stdio.
         Command::Run { request } => {
@@ -188,6 +194,9 @@ pub fn main_entry() -> std::process::ExitCode {
                 )
                 .await
             }
+            // The wizard prompts on the real stdio itself; it must not be
+            // wrapped in the buffered `println!` path.
+            Command::Setup => commands::setup::run(&data_dir::data_dir()).await,
             other => {
                 let text = execute(other, &data_dir::data_dir()).await?;
                 println!("{text}");

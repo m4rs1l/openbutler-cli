@@ -13,10 +13,19 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   same directory, and neither touches the legacy Node install's
   `openbutler` data.
 
-## [Unreleased]
-
 ### Added
 
+- `openbutler setup` — the first-run wizard. Prompts collect the
+  provider id, required URL, masked keys and a free-text default model;
+  the review builds one `settings.setup` payload and the daemon writes
+  both documents (backend-owned: the source's client-side file write is
+  not ported). The terminal guard answers the source sentence when stdin
+  is not a terminal (exit 1); cancel is Ctrl+D/EOF or the discard choice.
+  Divergences are documented in the module and in `docs/surface.md`:
+  custom endpoints only, no npm prompt, plain numbered menus, closing
+  hint says `run`. Five unit pins (transcript, refusals, discard/EOF,
+  render helpers, guard) plus two end-to-end pins (guard exit over the
+  real binary, payload against a contract-shaped fake daemon).
 - CLI slice S1: `openbutler status` and `openbutler sessions` over the
   framed local pipe, consuming only what the daemon computes. The client
   derives the endpoint from `openbutler-protocol::endpoint` (one dial

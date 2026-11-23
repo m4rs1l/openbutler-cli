@@ -1113,3 +1113,55 @@ async fn usage_json_shape_is_the_source_envelope() {
             .is_some_and(|days| days.is_empty())
     );
 }
+
+// --- setup ----------------------------------------------------------------
+
+#[test]
+fn setup_refuses_without_a_terminal() {
+    let dir = unique_dir("setup-guard");
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_openbutler"))
+        .arg("setup")
+        .env("OPENBUTLER_DATA_DIR", &dir)
+        .stdin(std::process::Stdio::piped())
+        .output()
+        .expect("spawn the binary");
+    assert_eq!(output.status.code(), Some(1), "a refusal is exit class 1");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains(openbutler_cli::commands::setup::TTY_REFUSAL),
+        "stderr must carry the guard sentence, got: {stderr}"
+    );
+}
+
+#[tokio::test]
+async fn setup_save_posts_the_payload_and_names_the_file() {
+    let dir = unique_dir("setup-save");
+    let responder: Responder = Arc::new(|request| {
+        assert_eq!(request.action, "settings.setup");
+        assert_eq!(request.payload["providers"][0]["id"], "mock");
+        assert_eq!(request.payload["providers"][0]["keys"][0], "sk-x");
+        assert_eq!(request.payload["providers"][0]["url"], "http://h");
+        assert_eq!(request.payload["defaultProvider"], "mock");
+        assert_eq!(request.payload["defaultModel"], "mock/m");
+        success(
+            request,
+            json!({
+                "settingsFile": "/ob/data/settings.yaml",
+                "configFile": "/ob/data/config.yaml",
+            }),
+        )
+    });
+    let _server = serve(&dir, responder);
+
+    let file = openbutler_cli::commands::setup::save(
+        &dir,
+        json!({
+            "providers": [{ "id": "mock", "keys": ["sk-x"], "url": "http://h" }],
+            "defaultProvider": "mock",
+            "defaultModel": "mock/m",
+        }),
+    )
+    .await
+    .expect("the fake daemon answers");
+    assert_eq!(file, "/ob/data/settings.yaml");
+}
