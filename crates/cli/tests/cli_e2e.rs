@@ -1165,3 +1165,86 @@ async fn setup_save_posts_the_payload_and_names_the_file() {
     .expect("the fake daemon answers");
     assert_eq!(file, "/ob/data/settings.yaml");
 }
+
+#[tokio::test]
+async fn config_renders_the_report_the_daemon_computed() {
+    let dir = unique_dir("config");
+    let responder: Responder = Arc::new(|request| {
+        assert_eq!(request.action, "config.report");
+        success(
+            request,
+            json!({
+                "mcpServers": [],
+                "defaultWorkspace": null,
+                "toolAccess": "Workspace (default)",
+                "hasProviders": true,
+                "catalogLoaded": false,
+                "catalogLoading": true,
+                "providers": [
+                    {
+                        "id": "mock", "enabled": true, "keyCount": 1,
+                        "toolCapableCount": null, "isDefault": true, "custom": true,
+                        "url": "http://127.0.0.1:9/v1", "defaultModel": "test-model"
+                    }
+                ],
+                "default": { "providerId": "mock", "modelId": "test-model", "source": "settings" },
+                "reasoning": "default",
+                "showReasoning": true,
+                "readiness": { "ready": true, "problems": [], "hints": [] }
+            }),
+        )
+    });
+    let _server = serve(&dir, responder);
+
+    let text = execute(Command::Config, &dir).await.unwrap();
+    let lines: Vec<&str> = text.lines().map(str::trim_end).collect();
+    assert_eq!(
+        lines[0], "",
+        "the screen opens with the section's blank line"
+    );
+    assert!(
+        lines[1].starts_with("\u{2500}\u{2500} MCP servers "),
+        "{:?}",
+        lines[1]
+    );
+    assert!(text.contains("\u{b7} No MCP servers configured."), "{text}");
+    assert!(
+        text.contains("  Tool access            Workspace (default)"),
+        "{text}"
+    );
+    assert!(
+        text.contains("  mock *    on     1     unknown  test-model  custom"),
+        "the provider row is the daemon's row, laid out: {text}"
+    );
+    assert!(
+        text.contains("  Default                mock / test-model"),
+        "{text}"
+    );
+    assert!(
+        text.contains("The catalog is downloading in the background"),
+        "{text}"
+    );
+    assert!(text.contains("\u{2714} Ready to run."), "{text}");
+    assert!(
+        lines
+            .last()
+            .is_some_and(|line| line.starts_with("\u{b7} The catalog is downloading")),
+        "the download note closes the screen: {text}"
+    );
+}
+
+#[tokio::test]
+async fn config_surfaces_the_daemons_refusal_sentence() {
+    let dir = unique_dir("config-refusal");
+    let responder: Responder = Arc::new(|request| DaemonResponse::Failure {
+        version: DAEMON_PROTOCOL_VERSION,
+        id: request.id.clone(),
+        ok: false,
+        error: "settings are not loaded".to_owned(),
+    });
+    let _server = serve(&dir, responder);
+
+    let error = execute(Command::Config, &dir).await.unwrap_err();
+    assert!(matches!(error, CliError::Answer(_)));
+    assert_eq!(error.to_string(), "settings are not loaded");
+}

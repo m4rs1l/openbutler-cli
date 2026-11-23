@@ -7,6 +7,7 @@
 pub mod client;
 pub mod commands;
 pub mod data_dir;
+pub mod ui;
 
 use commands::run;
 use std::io::Write;
@@ -69,6 +70,8 @@ pub enum Command {
     },
     /// First-run setup wizard (interactive).
     Setup,
+    /// The manager screen: providers, default model, readiness.
+    Config,
 }
 
 /// `openbutler daemon` subcommands; bare `daemon` means `status`, the
@@ -110,6 +113,7 @@ pub async fn execute(command: Command, data_dir: &std::path::Path) -> Result<Str
         // buffered path the guard fires first, so a non-terminal caller
         // gets the refusal sentence and no prompts.
         Command::Setup => commands::setup::run(data_dir).await.map(|()| String::new()),
+        Command::Config => commands::config::run(data_dir).await,
         // The buffered path (tests and callers without a terminal); the
         // binary streams a run straight to the real stdio.
         Command::Run { request } => {

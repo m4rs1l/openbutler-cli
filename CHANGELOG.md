@@ -15,6 +15,22 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- `openbutler config` — the manager screen, rendered entirely from the
+  daemon's `config.report`: MCP servers, default workspace, approval-mode
+  label, the provider table (stored order, kind, keys, tool counts, the
+  default row's model), the default pair with `(from usage)`, the
+  reasoning line and readiness with the source's sentences. Divergences
+  are documented in the module and `docs/surface.md`: the daemon starts
+  the catalog download instead of blocking on it (a first run shows
+  `unknown` plus a note), the no-default hint says `run`, MCP rows are
+  id-sorted. Three unit pins (full screen byte for byte, empty machine,
+  usage default + download note) and two end-to-end pins over the fake
+  daemon (render, refusal sentence).
+- A shared `ui` module (section bar, key/value line, markers, table — the
+  `ui.ts` shapes, trailing `padEnd` included) is now the one render
+  authority: `setup` moved onto it and `config` was built on it. Five
+  pins.
+
 - `openbutler setup` — the first-run wizard. Prompts collect the
   provider id, required URL, masked keys and a free-text default model;
   the review builds one `settings.setup` payload and the daemon writes

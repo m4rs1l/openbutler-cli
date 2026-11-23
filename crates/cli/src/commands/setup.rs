@@ -106,9 +106,12 @@ fn walk<T: Term>(term: &mut T, data_dir: &Path) -> Outcome {
 
 fn walk_inner<T: Term>(term: &mut T, data_dir: &Path) -> Option<Outcome> {
     term.write("");
-    term.write(&section_line("Setup"));
-    term.write(&kv_line("Data directory", &data_dir.display().to_string()));
-    term.write(&kv_line(
+    term.write(&crate::ui::section("Setup"));
+    term.write(&crate::ui::kv(
+        "Data directory",
+        &data_dir.display().to_string(),
+    ));
+    term.write(&crate::ui::kv(
         "Settings file",
         &data_dir.join("settings.yaml").display().to_string(),
     ));
@@ -120,7 +123,7 @@ fn walk_inner<T: Term>(term: &mut T, data_dir: &Path) -> Option<Outcome> {
 
     loop {
         term.write("");
-        term.write(&section_line("LLM providers"));
+        term.write(&crate::ui::section("LLM providers"));
         // This build has no catalog; the source prints exactly this when
         // the index cannot load (setup.ts L322), and it is permanent here.
         term.write("! Catalog unavailable; only custom endpoints can be configured.");
@@ -150,7 +153,7 @@ fn walk_inner<T: Term>(term: &mut T, data_dir: &Path) -> Option<Outcome> {
         }
 
         term.write("");
-        term.write(&section_line("Review"));
+        term.write(&crate::ui::section("Review"));
         if collected.is_empty() {
             term.write("  \u{b7} no provider configured");
         } else {
@@ -168,7 +171,7 @@ fn walk_inner<T: Term>(term: &mut T, data_dir: &Path) -> Option<Outcome> {
             Some((provider, model)) => format!("{provider} / {model}"),
             None => "(none)".to_owned(),
         };
-        term.write(&kv_line("Default model", &default_line));
+        term.write(&crate::ui::kv("Default model", &default_line));
 
         let decision = select(
             term,
@@ -339,18 +342,6 @@ fn last_four(key: &str) -> String {
         .collect()
 }
 
-/// `ui.section` (ui.ts L11): `── Title ─────`, a uniform 57-column line
-/// while the title fits (`max(3, 56 - len - 3)`).
-fn section_line(title: &str) -> String {
-    let fill = (56usize.saturating_sub(title.len() + 3)).max(3);
-    format!("\u{2500}\u{2500} {title} {}", "\u{2500}".repeat(fill))
-}
-
-/// `ui.kv` (ui.ts L31): two spaces, key padded to 22, one space, value.
-fn kv_line(key: &str, value: &str) -> String {
-    format!("  {key:<22} {value}")
-}
-
 /// The save payload: one entry per provider collected this run and the
 /// default pair together or not at all (the source's `setDefaultModel`).
 fn build_payload(collected: &[Collected], default_pair: Option<&(String, String)>) -> Value {
@@ -501,7 +492,7 @@ mod tests {
             // has its own literal pin in `render_helpers_match_the_source_shapes`.
             format!(
                 "{}\n",
-                kv_line(
+                crate::ui::kv(
                     "Settings file",
                     &settings_path.display().to_string()
                 )
@@ -615,12 +606,12 @@ mod tests {
     #[test]
     fn render_helpers_match_the_source_shapes() {
         assert_eq!(
-            section_line("Setup"),
+            crate::ui::section("Setup"),
             format!("\u{2500}\u{2500} Setup {}", "\u{2500}".repeat(48))
         );
-        assert_eq!(section_line("LLM providers").chars().count(), 57);
+        assert_eq!(crate::ui::section("LLM providers").chars().count(), 57);
         assert_eq!(
-            kv_line("Default model", "p / m"),
+            crate::ui::kv("Default model", "p / m"),
             "  Default model          p / m"
         );
 
