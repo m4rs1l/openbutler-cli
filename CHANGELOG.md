@@ -15,6 +15,18 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- `openbutler daemon restart` — the source's one restart flow: the stop
+  half asks the host's `stop` with the source's `restart` flag over one
+  connection (so every other client hears the restart wording), waits at
+  250 ms for the endpoint, then starts again and prints the source's two
+  closing lines. The flow tolerates a host that is not running and keeps
+  the saved listener. Divergences, documented in the module: no separate
+  web process in this build, so the source's browser-server lines have
+  nothing to report. The listener hint now names the command this surface
+  actually ships (`openbutler daemon restart`). Pins: the stop payload
+  (`{"restart": true}`) against the fake daemon, the not-running
+  tolerance, and the rendered closing lines.
+
 - `openbutler tui` — the interactive session (ratatui + crossterm, slim
   first). Three parts with one job each: `tui::model` decides (pure —
   keys, intents, patch application), `tui::render` draws (pinned through
@@ -34,7 +46,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (`settings.set-listen`, validated by the rule the host binds by): a cold
   start passes the flag to the child and persists it once the host
   answers, a running host persists and says the source's line
-  (`The saved listener applies on the next `openbutler restart`.`, exit
+  (`The saved listener applies on the next `openbutler daemon restart`.`, exit
   0). `--no-listen` clears it and prints the source's cleared note. Both
   halves pinned end to end against the fake daemon (payload + rendered
   lines).

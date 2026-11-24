@@ -87,6 +87,8 @@ pub enum DaemonCommand {
     Stop,
     /// Mint a one-time pairing code for a remote client.
     Pair,
+    /// Recycle the host: stop it, wait for the endpoint, start it again.
+    Restart,
     /// Start the background host (or report the running one).
     Start {
         /// Save the remote listener every later boot binds (`host:port`).
@@ -110,6 +112,7 @@ pub async fn execute(command: Command, data_dir: &std::path::Path) -> Result<Str
             DaemonCommand::Status => commands::daemon::status(data_dir).await,
             DaemonCommand::Stop => commands::daemon::stop(data_dir).await,
             DaemonCommand::Pair => commands::daemon::pair(data_dir).await,
+            DaemonCommand::Restart => commands::daemon::restart(data_dir).await,
             DaemonCommand::Start { listen, no_listen } => {
                 commands::daemon::start(data_dir, listen, no_listen).await
             }

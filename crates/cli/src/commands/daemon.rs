@@ -89,6 +89,74 @@ pub async fn stop(data_dir: &Path) -> Result<String, CliError> {
     }
 }
 
+/// `openbutler daemon restart` — recycle the host.
+///
+/// Source: the one restart flow shared by `openbutler restart` and
+/// `openbutler daemon restart` (cli-main.ts L1669-1691, daemon.ts L414),
+/// read 2026-11-24. Divergence, deliberate: this build has no separate web
+/// process (the HTTP server lives inside the daemon), so the source's
+/// browser-server lines have nothing to report.
+pub async fn restart(data_dir: &Path) -> Result<String, CliError> {
+    let exe = resolve_daemon_exe()?;
+    restart_with(data_dir, &exe).await
+}
+
+/// Restart with an explicit executable (the test seam, like [`start_with`]).
+pub async fn restart_with(data_dir: &Path, exe: &Path) -> Result<String, CliError> {
+    // The source's first line goes out before the stop (cli-main.ts L1675).
+    println!("Stopping active runs and saving sessions…");
+    stop_for_restart(data_dir).await?;
+    // A restart keeps the saved listener and records nothing new: the boot
+    // binds the stored preference, exactly like a flagless start.
+    let started = start_status(data_dir, exe, None, false).await?;
+    Ok(render_restarted(started.status.pid))
+}
+
+/// The source's two closing lines (cli-main.ts L1677, L1683).
+fn render_restarted(pid: u32) -> String {
+    format!("Background host restarted (pid {pid}).\nOpen sessions reconnect automatically.")
+}
+
+/// The stop half of a restart: the same wait as [`stop`], asking with the
+/// source's `restart` flag (daemon.ts L369) so every other client hears the
+/// restart wording. A host that is not running is fine — there is nothing to
+/// recycle.
+async fn stop_for_restart(data_dir: &Path) -> Result<(), CliError> {
+    // One connection carries the probe and the ask, the same shape as
+    // \`start_with\`: the host can never leave between the two and turn the
+    // ask into a silent no-op.
+    let mut client = match crate::client::Client::connect(data_dir).await {
+        Ok(client) => client,
+        Err(ClientError::Unreachable { .. }) => return Ok(()),
+        Err(error) => return Err(CliError::Client(error)),
+    };
+    let pid = decode_status(call_on(&mut client, "status", None).await?)?.pid;
+    let ack = call_on(
+        &mut client,
+        "stop",
+        Some(("restart", serde_json::Value::Bool(true))),
+    )
+    .await;
+    drop(client);
+    let deadline = tokio::time::Instant::now() + STOP_TIMEOUT;
+    loop {
+        tokio::time::sleep(POLL).await;
+        match status_pid(data_dir).await {
+            Err(CliError::Client(ClientError::Unreachable { .. })) => return Ok(()),
+            Err(error) => return Err(error),
+            Ok(_) => {}
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return Err(match ack {
+                Err(error) => error,
+                Ok(_) => CliError::Stop(format!(
+                    "OpenButler host process {pid} did not stop. Its process identity cannot be verified, so it was not terminated."
+                )),
+            });
+        }
+    }
+}
+
 /// `openbutler daemon pair` — mint one-time code a remote client
 /// redeems. The five-minute TTL lives daemon-side (`pair.create`), and
 /// the redeem command in the hint is the source's canonical form.
@@ -138,6 +206,29 @@ pub async fn start_with(
     listen: Option<String>,
     no_listen: bool,
 ) -> Result<String, CliError> {
+    let started = start_status(data_dir, exe, listen, no_listen).await?;
+    Ok(render_started(
+        &started.status,
+        started.saved.as_deref(),
+        no_listen,
+        started.was_running,
+    ))
+}
+
+/// What a successful start found: the report, the listener this run
+/// persisted, and whether the host was already answering.
+struct Started {
+    status: openbutler_protocol::DaemonStatus,
+    saved: Option<String>,
+    was_running: bool,
+}
+
+async fn start_status(
+    data_dir: &Path,
+    exe: &Path,
+    listen: Option<String>,
+    no_listen: bool,
+) -> Result<Started, CliError> {
     // One connection carries the whole start: the probe and the write.
     // The source could probe and write without a host (its files were the
     // CLI's); here both are the daemon's, so a single socket does the run.
@@ -149,7 +240,11 @@ pub async fn start_with(
     if let Some(mut client) = connected {
         let status = decode_status(call_on(&mut client, "status", None).await?)?;
         let saved = persist_listen_on(&mut client, listen.as_deref(), no_listen).await?;
-        return Ok(render_started(&status, saved.as_deref(), no_listen, true));
+        return Ok(Started {
+            status,
+            saved,
+            was_running: true,
+        });
     }
     std::fs::create_dir_all(data_dir).map_err(|error| {
         CliError::Start(format!(
@@ -184,7 +279,11 @@ pub async fn start_with(
     let mut client = crate::client::Client::connect(data_dir).await?;
     let status = decode_status(call_on(&mut client, "status", None).await?)?;
     let saved = persist_listen_on(&mut client, listen.as_deref(), no_listen).await?;
-    Ok(render_started(&status, saved.as_deref(), no_listen, false))
+    Ok(Started {
+        status,
+        saved,
+        was_running: false,
+    })
 }
 
 /// One request on an open connection, answered as the daemon's payload.
@@ -475,9 +574,14 @@ fn render_started(
             crate::ui::kv("Listener", &format!("{spec} (remote clients attach here)"))
         ));
         if was_running {
+            // The source said `openbutler restart` (cli-main.ts L1808); this
+            // surface has only the explicit `daemon restart`, so the hint
+            // names a command that exists (a divergence, documented).
             text.push_str(&format!(
                 "\n{}",
-                crate::ui::info("The saved listener applies on the next `openbutler restart`.")
+                crate::ui::info(
+                    "The saved listener applies on the next `openbutler daemon restart`."
+                )
             ));
         }
     }
@@ -506,4 +610,19 @@ async fn status_report(data_dir: &Path) -> Result<openbutler_protocol::DaemonSta
 /// The host's status reduced to the pid the stop flow tracks.
 async fn status_pid(data_dir: &Path) -> Result<u32, CliError> {
     Ok(status_report(data_dir).await?.pid)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::render_restarted;
+
+    /// The two closing lines (cli-main.ts L1677/L1683); reaching them
+    /// through the command needs a live host, so the text is pinned here.
+    #[test]
+    fn the_restart_render_uses_the_source_lines() {
+        assert_eq!(
+            render_restarted(4242),
+            "Background host restarted (pid 4242).\nOpen sessions reconnect automatically."
+        );
+    }
 }

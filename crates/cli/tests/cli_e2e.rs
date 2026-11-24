@@ -1290,7 +1290,7 @@ async fn daemon_start_persists_the_listener_through_the_daemon() {
         openbutler_cli::ui::kv("Listener", "100.64.0.5:45280 (remote clients attach here)");
     assert!(text.contains(&expected), "{text}");
     assert!(
-        text.contains("The saved listener applies on the next `openbutler restart`."),
+        text.contains("The saved listener applies on the next `openbutler daemon restart`."),
         "{text}"
     );
     let payloads = seen.lock().unwrap();
@@ -1356,4 +1356,56 @@ async fn tui_refuses_without_a_terminal() {
         }
         other => panic!("expected the terminal refusal, got {other:?}"),
     }
+}
+// ------------------------------------------------------ daemon restart (S3)
+
+#[tokio::test]
+async fn daemon_restart_stops_with_the_restart_flag_then_starts_again() {
+    let dir = unique_dir("daemon-restart");
+    let seen = Arc::new(std::sync::Mutex::new(None));
+    let responder: Responder = {
+        let seen = seen.clone();
+        Arc::new(
+            move |request: &DaemonRequest| match request.action.as_str() {
+                "status" => success(request, status_fixture(4242)),
+                "stop" => {
+                    *seen.lock().unwrap() = Some(Value::Object(request.payload.clone()));
+                    success(request, json!({ "stopping": true }))
+                }
+                other => panic!("unexpected action {other}"),
+            },
+        )
+    };
+    let _server = serve(&dir, responder);
+
+    // The spawn half needs a real host, so it fails on a missing executable;
+    // reaching that error proves the stop half ran to completion first.
+    let missing = dir.join("no-such-daemon.exe");
+    let error = openbutler_cli::commands::daemon::restart_with(&dir, &missing)
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("Could not start"), "{error}");
+
+    let payload = seen
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("the stop ask must arrive");
+    assert_eq!(
+        payload,
+        json!({ "restart": true }),
+        "the restart flow must carry the source's restart flag"
+    );
+}
+
+#[tokio::test]
+async fn daemon_restart_tolerates_a_host_that_is_not_running() {
+    let dir = unique_dir("daemon-restart-idle");
+    let missing = dir.join("no-such-daemon.exe");
+    let error = openbutler_cli::commands::daemon::restart_with(&dir, &missing)
+        .await
+        .unwrap_err();
+    // Not "cannot connect": with nothing to recycle the flow goes straight
+    // to the start half.
+    assert!(error.to_string().contains("Could not start"), "{error}");
 }
