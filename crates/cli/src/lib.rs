@@ -89,6 +89,15 @@ pub enum DaemonCommand {
     Pair,
     /// Recycle the host: stop it, wait for the endpoint, start it again.
     Restart,
+    /// Run the host in the foreground (entry points use this).
+    Run {
+        /// Remote listener for this run (`host:port`); not saved.
+        #[arg(long, value_name = "HOST:PORT", conflicts_with = "no_listen")]
+        listen: Option<String>,
+        /// Refuse the saved listener for this run.
+        #[arg(long)]
+        no_listen: bool,
+    },
     /// Start the background host (or report the running one).
     Start {
         /// Save the remote listener every later boot binds (`host:port`).
@@ -113,6 +122,11 @@ pub async fn execute(command: Command, data_dir: &std::path::Path) -> Result<Str
             DaemonCommand::Stop => commands::daemon::stop(data_dir).await,
             DaemonCommand::Pair => commands::daemon::pair(data_dir).await,
             DaemonCommand::Restart => commands::daemon::restart(data_dir).await,
+            DaemonCommand::Run { listen, no_listen } => {
+                commands::daemon::run_foreground(data_dir, listen, no_listen)
+                    .await
+                    .map(|_| String::new())
+            }
             DaemonCommand::Start { listen, no_listen } => {
                 commands::daemon::start(data_dir, listen, no_listen).await
             }
@@ -202,7 +216,7 @@ pub fn main_entry() -> std::process::ExitCode {
             return std::process::ExitCode::from(1);
         }
     };
-    let outcome: Result<(), CliError> = runtime.block_on(async {
+    let outcome: Result<i32, CliError> = runtime.block_on(async {
         match command {
             // A run streams live: stdout and stderr go straight through.
             Command::Run { request } => {
@@ -215,21 +229,29 @@ pub fn main_entry() -> std::process::ExitCode {
                     &mut err,
                 )
                 .await
+                .map(|()| 0)
             }
+            // The foreground host owns this process's exit status.
+            Command::Daemon {
+                command: Some(DaemonCommand::Run { listen, no_listen }),
+            } => commands::daemon::run_foreground(&data_dir::data_dir(), listen, no_listen).await,
             // The wizard prompts on the real stdio itself; it must not be
             // wrapped in the buffered `println!` path.
-            Command::Setup => commands::setup::run(&data_dir::data_dir()).await,
+            Command::Setup => commands::setup::run(&data_dir::data_dir())
+                .await
+                .map(|()| 0),
             // The TUI draws on the real terminal itself.
-            Command::Tui => crate::tui::run(&data_dir::data_dir()).await,
+            Command::Tui => crate::tui::run(&data_dir::data_dir()).await.map(|()| 0),
             other => {
                 let text = execute(other, &data_dir::data_dir()).await?;
                 println!("{text}");
-                Ok(())
+                Ok(0)
             }
         }
     });
     match outcome {
-        Ok(()) => std::process::ExitCode::SUCCESS,
+        Ok(0) => std::process::ExitCode::SUCCESS,
+        Ok(code) => std::process::ExitCode::from(u8::try_from(code).unwrap_or(1)),
         Err(error) => {
             eprintln!("openbutler: {error}");
             std::process::ExitCode::from(1)

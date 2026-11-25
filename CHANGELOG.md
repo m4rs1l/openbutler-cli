@@ -15,6 +15,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- `openbutler daemon run [--listen HOST:PORT | --no-listen]` — the host in
+  the foreground: the CLI runs the daemon executable with inherited stdio
+  and hands back its exit status, so the start lock, the listener
+  validation and the serve loop all stay daemon-side. Deliberate
+  divergence: the source ran the host in-process; this stack's host is its
+  own binary. Pins: the child's status is handed back (a real executable
+  exiting 1), and a missing executable is the start sentence. Verified
+  live: the foreground host answers `status`, stops on `daemon stop`, and
+  the CLI exits 0 with the daemon's IPC line on stderr.
+
 - `openbutler daemon restart` — the source's one restart flow: the stop
   half asks the host's `stop` with the source's `restart` flag over one
   connection (so every other client hears the restart wording), waits at

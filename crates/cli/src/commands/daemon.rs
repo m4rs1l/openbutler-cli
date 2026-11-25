@@ -117,6 +117,55 @@ fn render_restarted(pid: u32) -> String {
     format!("Background host restarted (pid {pid}).\nOpen sessions reconnect automatically.")
 }
 
+/// `openbutler daemon run` — the host in the foreground.
+///
+/// Source: `runDaemonProcess` (daemon.ts L607, read 2026-11-24). In this
+/// split-binary stack the host is its own executable: the CLI runs it with
+/// inherited stdio and hands back its exit status. The start lock, the
+/// listener validation and the serve loop all stay daemon-side, so a
+/// second foreground host gets the daemon's own refusal sentence on stderr
+/// and this process exits with the daemon's code.
+pub async fn run_foreground(
+    data_dir: &Path,
+    listen: Option<String>,
+    no_listen: bool,
+) -> Result<i32, CliError> {
+    let exe = resolve_daemon_exe()?;
+    run_foreground_with(data_dir, &exe, listen, no_listen).await
+}
+
+/// Foreground run with an explicit executable (the test seam).
+pub async fn run_foreground_with(
+    data_dir: &Path,
+    exe: &Path,
+    listen: Option<String>,
+    no_listen: bool,
+) -> Result<i32, CliError> {
+    use std::process::Stdio;
+    let mut command = std::process::Command::new(exe);
+    command.arg("run");
+    // The child must resolve the same data directory this CLI resolved.
+    command.env("OPENBUTLER_DATA_DIR", data_dir);
+    if let Some(spec) = listen {
+        command.arg("--listen").arg(spec);
+    }
+    if no_listen {
+        command.arg("--no-listen");
+    }
+    command
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit());
+    let status = command.status().map_err(|error| {
+        CliError::Start(format!(
+            "Could not start the background host {}: {error}",
+            exe.display()
+        ))
+    })?;
+    // A signal-terminated child has no code; the failure class is exit 1.
+    Ok(status.code().unwrap_or(1))
+}
+
 /// The stop half of a restart: the same wait as [`stop`], asking with the
 /// source's `restart` flag (daemon.ts L369) so every other client hears the
 /// restart wording. A host that is not running is fine — there is nothing to

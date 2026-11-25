@@ -1409,3 +1409,27 @@ async fn daemon_restart_tolerates_a_host_that_is_not_running() {
     // to the start half.
     assert!(error.to_string().contains("Could not start"), "{error}");
 }
+
+// --------------------------------------------------------- daemon run (S3)
+
+#[tokio::test]
+async fn daemon_run_hands_back_the_child_status() {
+    // A real executable that exits 1 for an unexpected argument: the point
+    // is that the foreground run returns the child's code, not an error.
+    let exe = PathBuf::from("where.exe");
+    let dir = unique_dir("daemon-run");
+    let code = openbutler_cli::commands::daemon::run_foreground_with(&dir, &exe, None, false)
+        .await
+        .unwrap();
+    assert_eq!(code, 1);
+}
+
+#[tokio::test]
+async fn daemon_run_reports_a_missing_executable() {
+    let dir = unique_dir("daemon-run-missing");
+    let missing = dir.join("no-such-daemon.exe");
+    let error = openbutler_cli::commands::daemon::run_foreground_with(&dir, &missing, None, false)
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("Could not start"), "{error}");
+}
