@@ -238,4 +238,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   transcript gap on the daemon side, so the surface doc's gap list is
   empty.
 
+### Fixed
+
+- The framed client keeps every frame a socket read completes. One read can
+  carry a burst (the host writes a response and the events behind it back to
+  back); only the first frame was returned, so a run could lose its final
+  state patch and wait out the idle deadline. The client now queues every
+  frame it decoded.
+
 [Unreleased]: https://github.com/m4rs1l/openbutler-cli/commits/main

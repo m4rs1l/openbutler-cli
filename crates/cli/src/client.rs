@@ -56,6 +56,10 @@ pub struct Client {
     stream: Stream,
     decoder: FrameDecoder,
     buffer: Vec<u8>,
+    /// Frames a single read completed but the caller has not asked for yet:
+    /// one read can carry a burst (the host flushes a response and the events
+    /// behind it back to back), and dropping the tail loses state changes.
+    pending: std::collections::VecDeque<Vec<u8>>,
     data_dir: String,
     endpoint: String,
 }
@@ -76,6 +80,7 @@ impl Client {
             stream,
             decoder: FrameDecoder::new(MAX_DAEMON_FRAME_BYTES),
             buffer: vec![0u8; 16 * 1024],
+            pending: std::collections::VecDeque::new(),
             data_dir: data_dir.display().to_string(),
             endpoint,
         })
@@ -152,18 +157,25 @@ impl Client {
         })
     }
 
-    /// Reads until one complete frame is assembled.
+    /// Reads until one complete frame is assembled, keeping every frame the
+    /// read completed: the next call serves them from the queue instead of
+    /// waiting for a socket read that will never come.
     async fn next_frame(&mut self) -> Result<Option<Vec<u8>>, ClientError> {
         loop {
-            let read = self.stream.read(&mut self.buffer).await?;
-            if read == 0 {
-                // A pending frame may still be complete in the decoder.
-                let rest = self.decoder.append(&[])?;
-                return Ok(rest.into_iter().next());
-            }
-            let frames = self.decoder.append(&self.buffer[..read])?;
-            if let Some(frame) = frames.into_iter().next() {
+            if let Some(frame) = self.pending.pop_front() {
                 return Ok(Some(frame));
+            }
+            let read = self.stream.read(&mut self.buffer).await?;
+            // A zero-byte read is EOF, but the decoder may still hold a
+            // complete frame from bytes already consumed.
+            let frames = if read == 0 {
+                self.decoder.append(&[])?
+            } else {
+                self.decoder.append(&self.buffer[..read])?
+            };
+            self.pending.extend(frames);
+            if read == 0 && self.pending.is_empty() {
+                return Ok(None);
             }
         }
     }
