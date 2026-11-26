@@ -123,6 +123,12 @@ pub enum Command {
         #[command(subcommand)]
         command: WorkspaceCommand,
     },
+    /// List the Agent Skills this machine offers.
+    Skills {
+        /// Scan this workspace instead of the stored default.
+        #[arg(long, value_name = "PATH")]
+        workspace: Option<String>,
+    },
     /// The approval posture: mode, timeouts, review model.
     Permissions {
         /// workspace | auto-review | full-access (bare: show the current one).
@@ -243,6 +249,7 @@ pub async fn execute(command: Command, data_dir: &std::path::Path) -> Result<Str
         Command::Workspace {
             command: WorkspaceCommand::Default { path },
         } => commands::workspace::run(data_dir, path).await,
+        Command::Skills { workspace } => commands::skills::run(data_dir, workspace).await,
         Command::Permissions {
             mode,
             review_timeout,

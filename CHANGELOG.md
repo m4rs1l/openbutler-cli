@@ -25,6 +25,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- `openbutler skills [--workspace PATH]` — the Agent Skill table (or the
+  source's empty screen naming every scanned root) from the daemon's
+  `skills.list`; discovery and frontmatter rules live in the host.
 - `openbutler workspace default [path]` — shows or saves the workspace
   bare launches use, through the daemon
   (`settings.set-default-workspace`); the path canonicalizes on the host,

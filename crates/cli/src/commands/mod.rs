@@ -11,6 +11,7 @@ pub mod permissions;
 pub mod run;
 pub mod sessions;
 pub mod setup;
+pub mod skills;
 pub mod status;
 pub mod usage;
 pub mod workspace;

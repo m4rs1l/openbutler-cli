@@ -1854,3 +1854,88 @@ async fn workspace_default_sends_the_path_and_names_the_saved_root() {
         "\u{2714} Bare OpenButler launches will use C:\\work\\proj."
     );
 }
+
+// ----------------------------------------------------------------- skills
+
+#[tokio::test]
+async fn skills_renders_the_host_table() {
+    let dir = unique_dir("skills-table");
+    let responder: Responder = Arc::new(|request| {
+        assert_eq!(request.action, "skills.list");
+        assert_eq!(request.payload["workspace"], "C:\\work\\proj");
+        success(
+            request,
+            json!({
+                "workspace": "C:\\work\\proj",
+                "skills": [
+                    {
+                        "name": "alpha", "scope": "workspace",
+                        "description": "A workspace skill.",
+                        "filePath": "C:\\work\\proj\\.agents\\skills\\alpha\\SKILL.md"
+                    },
+                    {
+                        "name": "beta", "scope": "global",
+                        "description": "A user skill.",
+                        "filePath": "C:\\Users\\me\\.agents\\skills\\beta\\SKILL.md"
+                    }
+                ],
+                "roots": []
+            }),
+        )
+    });
+    let _server = serve(&dir, responder);
+
+    let text = execute(
+        Command::Skills {
+            workspace: Some("C:\\work\\proj".to_owned()),
+        },
+        &dir,
+    )
+    .await
+    .unwrap();
+    let lines: Vec<&str> = text.lines().collect();
+    assert!(lines[0].starts_with("  NAME"), "{:?}", lines[0]);
+    assert!(lines[0].contains("SCOPE") && lines[0].contains("SKILL FILE"));
+    // The rule line, then the rows in the host's order.
+    assert!(lines[1].contains('\u{2500}'), "{:?}", lines[1]);
+    assert!(lines[2].contains("alpha") && lines[2].contains("workspace"));
+    assert!(lines[3].contains("beta") && lines[3].contains("global"));
+}
+
+#[tokio::test]
+async fn skills_without_a_skill_names_the_roots() {
+    let dir = unique_dir("skills-empty");
+    let responder: Responder = Arc::new(|request| {
+        assert!(request.payload.get("workspace").is_none());
+        success(
+            request,
+            json!({
+                "workspace": "C:\\data\\custodian",
+                "skills": [],
+                "roots": [
+                    { "scope": "builtin", "path": "C:\\app\\skills" },
+                    { "scope": "global", "path": "C:\\Users\\me\\.agents\\skills" }
+                ]
+            }),
+        )
+    });
+    let _server = serve(&dir, responder);
+
+    let text = execute(Command::Skills { workspace: None }, &dir)
+        .await
+        .unwrap();
+    let lines: Vec<&str> = text.lines().collect();
+    assert_eq!(lines[0], "\u{b7} No Agent Skills found.");
+    assert_eq!(
+        lines[1],
+        format!("  {:<22} {}", "builtin", "C:\\app\\skills")
+    );
+    assert_eq!(
+        lines[2],
+        format!("  {:<22} {}", "global", "C:\\Users\\me\\.agents\\skills")
+    );
+    assert_eq!(
+        lines[3],
+        "\u{b7} Add a skill-name/SKILL.md with Agent Skills frontmatter."
+    );
+}
