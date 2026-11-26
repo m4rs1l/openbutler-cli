@@ -209,10 +209,18 @@ impl App {
                     }
                 }
                 for delta in append_text {
-                    if let Some(SessionEntry::Assistant { text, .. }) =
-                        self.entries.get_mut(delta.index as usize)
-                    {
-                        text.push_str(&delta.delta);
+                    // Every text-carrying kind can grow: the host's diff does
+                    // not restrict continuations to assistant entries, and a
+                    // dropped one leaves a streaming block permanently empty.
+                    let Some(entry) = self.entries.get_mut(delta.index as usize) else {
+                        continue;
+                    };
+                    match entry {
+                        SessionEntry::Assistant { text, .. }
+                        | SessionEntry::Reasoning { text, .. }
+                        | SessionEntry::Notice { text, .. }
+                        | SessionEntry::User { text, .. } => text.push_str(&delta.delta),
+                        _ => {}
                     }
                 }
             }
@@ -508,6 +516,45 @@ mod tests {
             app.lines[2].text, "world",
             "the continuation lands in place"
         );
+    }
+
+    #[test]
+    fn a_reasoning_continuation_lands_in_its_own_entry() {
+        let attach: AttachResult = serde_json::from_value(attach_json()).unwrap();
+        let mut app = App::new();
+        app.open(&attach);
+        // The host's diff sends `appendText` for every text-carrying kind,
+        // and a streaming thinking block is one of them: a continuation that
+        // only lands on assistant entries would leave the block empty.
+        let patch = json!({
+            "event": "patch",
+            "version": 1,
+            "patch": {
+                "session": meta_json(),
+                "entriesPatch": {
+                    "kind": "delta",
+                    "append": [{ "kind": "reasoning", "text": "" }],
+                    "replace": [],
+                    "appendText": [{ "index": 2, "delta": "thinking" }]
+                },
+                "busy": true,
+                "runningTurnId": "t1",
+                "pendingApproval": null,
+                "pendingApprovalId": null,
+                "pendingQuestion": null,
+                "queuedMessageCount": 0,
+                "firstQueuedMessage": null,
+                "queuedMessages": [],
+                "sessionSaveError": null,
+                "streamingAssistantIndex": null,
+                "runtime": runtime_json()
+            }
+        });
+        let event: DaemonEvent = serde_json::from_value(patch).unwrap();
+        app.apply_event(&event);
+        assert_eq!(app.lines.len(), 3, "the thinking block has its own line");
+        assert_eq!(app.lines[2].kind, LineKind::Reasoning);
+        assert_eq!(app.lines[2].text, "~ thinking");
     }
 
     #[test]

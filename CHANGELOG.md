@@ -240,6 +240,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The TUI grows a reasoning block as it streams. A text continuation was
+  applied only to assistant entries, so the host's reasoning deltas were
+  dropped and the thinking block stayed empty on screen for the whole run.
+
 - The background host is spawned with this CLI's data directory. The child
   inherited the environment and resolved its own directory, so an overridden
   directory left the CLI probing an endpoint nothing was serving; the spawn
