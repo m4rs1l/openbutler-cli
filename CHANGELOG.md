@@ -7,6 +7,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- `daemon start --web` passes `--web` to the spawned host, which then
+  serves the browser UI; `openbutler web` prints its pair URL. A host that
+  is already running is reported unchanged.
 - `setup`'s Review block is the host's screen: the wizard asks
   `settings.setup.review` for the set it collected and prints the answered
   lines with its glyph palette. The body words and the "no provider

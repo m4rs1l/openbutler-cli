@@ -745,6 +745,7 @@ async fn daemon_start_reports_the_running_host_without_spawning() {
         Path::new("definitely-unused.exe"),
         None,
         false,
+        false,
     )
     .await
     .unwrap();
@@ -765,7 +766,7 @@ async fn daemon_start_diagnoses_a_child_that_died_before_ready() {
     let where_exe = std::env::var_os("WINDIR")
         .map(|windir| PathBuf::from(windir).join("System32").join("where.exe"))
         .expect("WINDIR is set on Windows");
-    let error = openbutler_cli::commands::daemon::start_with(&dir, &where_exe, None, false)
+    let error = openbutler_cli::commands::daemon::start_with(&dir, &where_exe, None, false, false)
         .await
         .expect_err("a dead child must fail the start");
     let message = error.to_string();
@@ -783,7 +784,7 @@ async fn daemon_start_diagnoses_a_child_that_died_before_ready() {
 async fn daemon_start_reports_a_missing_daemon_executable() {
     let dir = unique_dir("daemon-start-missing");
     let missing = dir.join("no-such-daemon.exe");
-    let error = openbutler_cli::commands::daemon::start_with(&dir, &missing, None, false)
+    let error = openbutler_cli::commands::daemon::start_with(&dir, &missing, None, false, false)
         .await
         .expect_err("a missing executable must fail the start");
     let message = error.to_string();
@@ -791,6 +792,33 @@ async fn daemon_start_reports_a_missing_daemon_executable() {
         message.starts_with("Could not start the background host: "),
         "{message}"
     );
+}
+
+/// `daemon start --web` hands `--web` to the spawned host and a plain start
+/// does not. `findstr run` stands in for the daemon: it treats every extra
+/// argument as a file to open, so `--web` surfaces in the machine log the
+/// start failure quotes, while the plain argv reads the null stdin silently.
+#[tokio::test]
+async fn daemon_start_web_passes_the_flag_to_the_child() {
+    let findstr = std::env::var_os("WINDIR")
+        .map(|windir| PathBuf::from(windir).join("System32").join("findstr.exe"))
+        .expect("WINDIR is set on Windows");
+
+    let with_web = unique_dir("daemon-start-web");
+    let message =
+        openbutler_cli::commands::daemon::start_with(&with_web, &findstr, None, false, true)
+            .await
+            .expect_err("the stand-in exits before ready")
+            .to_string();
+    assert!(message.contains("--web"), "{message}");
+
+    let plain = unique_dir("daemon-start-plain");
+    let message =
+        openbutler_cli::commands::daemon::start_with(&plain, &findstr, None, false, false)
+            .await
+            .expect_err("the stand-in exits before ready")
+            .to_string();
+    assert!(!message.contains("--web"), "{message}");
 }
 
 // ------------------------------------------------- machine log (S3)
@@ -1223,6 +1251,7 @@ async fn daemon_start_persists_the_listener_through_the_daemon() {
         Path::new("definitely-unused.exe"),
         Some("100.64.0.5:45280".to_owned()),
         false,
+        false,
     )
     .await
     .unwrap();
@@ -1268,6 +1297,7 @@ async fn daemon_start_no_listen_clears_the_preference() {
         Path::new("definitely-unused.exe"),
         None,
         true,
+        false,
     )
     .await
     .unwrap();

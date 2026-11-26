@@ -252,6 +252,9 @@ pub enum DaemonCommand {
         /// Refuse the saved listener for this run and clear it.
         #[arg(long)]
         no_listen: bool,
+        /// Also serve the browser UI (the pair URL lands in `openbutler web`).
+        #[arg(long)]
+        web: bool,
     },
 }
 
@@ -290,9 +293,11 @@ pub async fn execute(command: Command, data_dir: &std::path::Path) -> Result<Str
                     .map(|_| String::new())
             }
             DaemonCommand::Token { command } => commands::daemon::token(data_dir, command).await,
-            DaemonCommand::Start { listen, no_listen } => {
-                commands::daemon::start(data_dir, listen, no_listen).await
-            }
+            DaemonCommand::Start {
+                listen,
+                no_listen,
+                web,
+            } => commands::daemon::start(data_dir, listen, no_listen, web).await,
         },
         Command::Logs {
             lines,

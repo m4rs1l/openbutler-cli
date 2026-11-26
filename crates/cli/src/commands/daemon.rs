@@ -108,7 +108,7 @@ pub async fn restart_with(data_dir: &Path, exe: &Path) -> Result<String, CliErro
     stop_for_restart(data_dir).await?;
     // A restart keeps the saved listener and records nothing new: the boot
     // binds the stored preference, exactly like a flagless start.
-    let started = start_status(data_dir, exe, None, false).await?;
+    let started = start_status(data_dir, exe, None, false, false).await?;
     Ok(render_restarted(started.status.pid))
 }
 
@@ -314,9 +314,10 @@ pub async fn start(
     data_dir: &Path,
     listen: Option<String>,
     no_listen: bool,
+    web: bool,
 ) -> Result<String, CliError> {
     let exe = resolve_daemon_exe()?;
-    start_with(data_dir, &exe, listen, no_listen).await
+    start_with(data_dir, &exe, listen, no_listen, web).await
 }
 
 /// Start with an explicit executable — the test seam for the spawn
@@ -326,8 +327,9 @@ pub async fn start_with(
     exe: &Path,
     listen: Option<String>,
     no_listen: bool,
+    web: bool,
 ) -> Result<String, CliError> {
-    let started = start_status(data_dir, exe, listen, no_listen).await?;
+    let started = start_status(data_dir, exe, listen, no_listen, web).await?;
     Ok(render_started(
         &started.status,
         started.saved.as_deref(),
@@ -349,6 +351,7 @@ async fn start_status(
     exe: &Path,
     listen: Option<String>,
     no_listen: bool,
+    web: bool,
 ) -> Result<Started, CliError> {
     // One connection carries the whole start: the probe and the write.
     // The source could probe and write without a host (its files were the
@@ -376,7 +379,7 @@ async fn start_status(
 
     let mut attempt_index = 0usize;
     loop {
-        match spawn_and_wait(data_dir, exe, listen.as_deref(), no_listen).await {
+        match spawn_and_wait(data_dir, exe, listen.as_deref(), no_listen, web).await {
             Ok(()) => break,
             Err(failure) => {
                 // The source retries only a transient failure while a
@@ -472,6 +475,7 @@ async fn spawn_and_wait(
     exe: &Path,
     listen: Option<&str>,
     no_listen: bool,
+    web: bool,
 ) -> Result<(), StartupFailure> {
     use std::process::Stdio;
 
@@ -511,6 +515,10 @@ async fn spawn_and_wait(
     } else if no_listen {
         command.arg("--no-listen");
     }
+    if web {
+        command.arg("--web");
+    }
+
     #[cfg(unix)]
     command.process_group(0);
     #[cfg(windows)]
