@@ -19,9 +19,8 @@ crossterm = "0.29.0"
 openbutler-protocol = { git = "https://github.com/m4rs1l/openbutler-protocol", rev = "c6bb9d447f5411bb32af4e030131c5ea2b94cd3f", version = "0.0.1" }
 ratatui = "0.30.2"
 rpassword = "7.5.5"
-rusqlite = { version = "0.43", features = ["bundled"] }
 serde = { version = "1.0.229", features = ["derive"] }
-serde_json = "1.0.154"
+serde_json = { version = "1.0.154", features = ["preserve_order"] }
 thiserror = "2.0.21"
 tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "net", "io-util", "time", "signal"] }
 uuid = { version = "1.29.3", features = ["v4"] }

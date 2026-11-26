@@ -805,201 +805,91 @@ fn logs_lines_range_is_clap_usage() {
 
 // ------------------------------------------------- usage report (S3)
 
-/// The daemon's `openbutler_usage` DDL — the contract the reader was
-/// written against (copied from `ledger/usage.rs`; if it changes, these
-/// pins fail before a user does).
-fn seed_usage_db(dir: &Path) {
-    use rusqlite::Connection;
-    std::fs::create_dir_all(dir).unwrap();
-    let db = Connection::open(dir.join("state.db")).unwrap();
-    db.execute_batch(
-        "CREATE TABLE openbutler_usage (
-            id TEXT PRIMARY KEY,
-            at_ms INTEGER NOT NULL,
-            ended_ms INTEGER,
-            duration_ms INTEGER,
-            tz_offset_min INTEGER NOT NULL,
-            session_id TEXT NOT NULL,
-            turn_id TEXT,
-            event_id TEXT,
-            run_kind TEXT NOT NULL,
-            workspace_root TEXT,
-            provider_id TEXT NOT NULL,
-            model_id TEXT NOT NULL,
-            attempt INTEGER NOT NULL DEFAULT 1,
-            status TEXT NOT NULL,
-            input_tokens INTEGER,
-            no_cache_tokens INTEGER,
-            cache_read_tokens INTEGER,
-            cache_write_tokens INTEGER,
-            output_tokens INTEGER,
-            text_tokens INTEGER,
-            reasoning_tokens INTEGER,
-            total_tokens INTEGER,
-            usage_source TEXT NOT NULL,
-            context_tokens INTEGER,
-            price_input REAL,
-            price_output REAL,
-            price_reasoning REAL,
-            price_cache_read REAL,
-            price_cache_write REAL,
-            price_version TEXT,
-            cost_usd REAL,
-            cost_source TEXT,
-            upstream_provider TEXT,
-            generation_id TEXT
-        );",
-    )
-    .unwrap();
-}
-
-/// One seeded usage row. The argument list is the row itself — a
-/// fixture mirroring the INSERT, not an API.
-#[allow(clippy::too_many_arguments)]
-fn insert_usage_row(
-    dir: &Path,
-    id: &str,
-    at_ms: i64,
-    tz_offset_min: i64,
-    session: &str,
-    provider: &str,
-    model: &str,
-    input: Option<i64>,
-    no_cache: Option<i64>,
-    cache_read: Option<i64>,
-    output: Option<i64>,
-    reasoning: Option<i64>,
-    cost: Option<f64>,
-    duration_ms: i64,
-    cost_source: &str,
-) {
-    use rusqlite::Connection;
-    let db = Connection::open(dir.join("state.db")).unwrap();
-    db.execute(
-        "INSERT INTO openbutler_usage (
-            id, at_ms, tz_offset_min, session_id, run_kind, provider_id, model_id, status,
-            usage_source, input_tokens, no_cache_tokens, cache_read_tokens, cache_write_tokens,
-            output_tokens, reasoning_tokens, cost_usd, duration_ms, cost_source
-        ) VALUES (?1, ?2, ?3, ?4, 'chat', ?5, ?6, 'ok', 'provider', ?7, ?8, ?9, 0, ?10, ?11, ?12, ?13, ?14)",
-        rusqlite::params![
-            id,
-            at_ms,
-            tz_offset_min,
-            session,
-            provider,
-            model,
-            input,
-            no_cache,
-            cache_read,
-            output,
-            reasoning,
-            cost,
-            duration_ms,
-            cost_source
-        ],
-    )
-    .unwrap();
-}
-
-/// Today's UTC midnight as a millisecond anchor, so rows land in the
-/// window whatever day the test runs.
-fn utc_midnight_today_ms() -> i64 {
-    chrono::Utc::now()
-        .date_naive()
-        .and_hms_opt(0, 0, 0)
-        .unwrap()
-        .and_utc()
-        .timestamp_millis()
-}
-
-fn day_string(at_ms: i64) -> String {
-    use chrono::TimeZone;
-    chrono::Utc
-        .timestamp_millis_opt(at_ms)
-        .single()
-        .unwrap()
-        .format("%Y-%m-%d")
-        .to_string()
+/// A canned `usage.report` answer — the daemon's shape, lines included.
+fn usage_report(label: &str, days: Value, summary: Value, lines: Vec<&str>) -> Value {
+    json!({
+        "label": label,
+        "summary": summary,
+        "days": days,
+        "lines": lines,
+    })
 }
 
 #[tokio::test]
-async fn usage_renders_the_report_line_by_line() {
+async fn usage_prints_the_host_report_line_by_line() {
     let dir = unique_dir("usage-report");
-    seed_usage_db(&dir);
-    let midnight = utc_midnight_today_ms();
-    // Row A: three days back, zero offset (plain UTC day).
-    let at_a = midnight - 3 * 86_400_000;
-    // Row B: yesterday 23:00 UTC with a +180 min recorded offset — the
-    // local day rolls into today, so the row's own offset is what counts.
-    let at_b = midnight - 3_600_000;
-    let day_a = day_string(at_a);
-    let day_b = day_string(at_b + 180 * 60_000);
-    assert_ne!(day_a, day_b);
-    insert_usage_row(
-        &dir,
-        "row-a",
-        at_a,
-        0,
-        "sess-alpha",
-        "mock",
-        "demo",
-        Some(1000),
-        Some(600),
-        Some(400),
-        Some(200),
-        Some(50),
-        Some(0.0123),
-        1500,
-        "provider-inline",
-    );
-    insert_usage_row(
-        &dir,
-        "row-b",
-        at_b,
-        180,
-        "sess-beta",
-        "mock",
-        "demo",
-        Some(2000),
-        None,
-        None,
-        Some(300),
-        None,
-        Some(0.0456),
-        500,
-        "provider-inline",
-    );
-
+    let responder: Responder = Arc::new(|request| {
+        assert_eq!(request.action, "usage.report");
+        // The window and the scope are forwarded verbatim; nothing is
+        // recomputed here.
+        assert_eq!(request.payload["days"], 7);
+        assert_eq!(request.payload["session"], "sess-alpha");
+        assert_eq!(request.payload["model"], "mock/demo");
+        success(
+            request,
+            usage_report(
+                "last 7 days (session sess-alp, model mock/demo)",
+                json!([]),
+                json!({ "requests": 2 }),
+                vec![
+                    "Usage last 7 days (session sess-alp, model mock/demo)",
+                    "  requests 2  input 2.6k  cache read 400  cache write 0  output 500  reasoning 50  cost $0.0579",
+                    "  busiest 2026-11-20 (1 requests)  longest task 2s  streak 1d",
+                    "  cost source: provider for every request",
+                    "",
+                    "day         reqs    input    cache   output       cost",
+                    "2026-11-20     1      600      400      200    $0.0123",
+                    "",
+                    "token shape  ▄█",
+                ],
+            ),
+        )
+    });
+    let _server = serve(&dir, responder);
     let text = execute(
         Command::Usage {
-            days: 30,
-            session: None,
-            model: None,
+            days: 7,
+            session: Some("sess-alpha".to_owned()),
+            model: Some("mock/demo".to_owned()),
             json: false,
         },
         &dir,
     )
     .await
     .unwrap();
-    let expected = format!(
-        "Usage last 30 days\n  \
+    // Line for line — the CLI adds nothing and drops nothing.
+    assert_eq!(
+        text,
+        "Usage last 7 days (session sess-alp, model mock/demo)\n  \
          requests 2  input 2.6k  cache read 400  cache write 0  output 500  reasoning 50  cost $0.0579\n  \
-         busiest {day_a} (1 requests)  longest task 2s  streak 1d\n  \
+         busiest 2026-11-20 (1 requests)  longest task 2s  streak 1d\n  \
          cost source: provider for every request\n\
          \n\
          day         reqs    input    cache   output       cost\n\
-         {day_a}     1      600      400      200    $0.0123\n\
-         {day_b}     1     2.0k        0      300    $0.0456\n\
+         2026-11-20     1      600      400      200    $0.0123\n\
          \n\
          token shape  ▄█"
     );
-    assert_eq!(text, expected);
 }
 
 #[tokio::test]
 async fn usage_without_rows_says_so() {
     let dir = unique_dir("usage-empty");
-    seed_usage_db(&dir);
+    let responder: Responder = Arc::new(|request| {
+        // Absent filters stay absent on the wire (no empty strings).
+        assert!(request.payload.get("session").is_none());
+        assert!(request.payload.get("model").is_none());
+        success(
+            request,
+            usage_report(
+                "last 30 days",
+                json!([]),
+                json!({ "days": 0, "requests": 0, "streakDays": 0, "busiest": null }),
+                vec!["No usage recorded last 30 days."],
+            ),
+        )
+    });
+    let _server = serve(&dir, responder);
     let text = execute(
         Command::Usage {
             days: 30,
@@ -1015,88 +905,21 @@ async fn usage_without_rows_says_so() {
 }
 
 #[tokio::test]
-async fn usage_filters_by_session_and_model() {
-    let dir = unique_dir("usage-filter");
-    seed_usage_db(&dir);
-    let midnight = utc_midnight_today_ms();
-    insert_usage_row(
-        &dir,
-        "keep",
-        midnight - 86_400_000,
-        0,
-        "sess-alpha",
-        "mock",
-        "demo",
-        Some(500),
-        None,
-        None,
-        Some(100),
-        None,
-        Some(0.001),
-        300,
-        "provider-inline",
-    );
-    insert_usage_row(
-        &dir,
-        "other-session",
-        midnight - 86_400_000,
-        0,
-        "sess-beta",
-        "mock",
-        "demo",
-        Some(9_999),
-        None,
-        None,
-        Some(9_999),
-        None,
-        Some(9.9),
-        900,
-        "provider-inline",
-    );
-    insert_usage_row(
-        &dir,
-        "other-model",
-        midnight - 86_400_000,
-        0,
-        "sess-alpha",
-        "other",
-        "model-x",
-        Some(9_999),
-        None,
-        None,
-        Some(9_999),
-        None,
-        Some(9.9),
-        900,
-        "provider-inline",
-    );
-
-    let text = execute(
-        Command::Usage {
-            days: 30,
-            session: Some("sess-alpha".to_owned()),
-            model: Some("mock/demo".to_owned()),
-            json: false,
-        },
-        &dir,
-    )
-    .await
-    .unwrap();
-    let lines: Vec<&str> = text.lines().collect();
-    // The source's `slice(0, 8)`: the first eight characters, not the
-    // whole id.
-    assert_eq!(
-        lines[0],
-        "Usage last 30 days (session sess-alp, model mock/demo)"
-    );
-    assert!(lines[1].contains("requests 1"), "{}", lines[1]);
-    assert!(lines[1].contains("cost $0.0010"), "{}", lines[1]);
-}
-
-#[tokio::test]
-async fn usage_json_shape_is_the_source_envelope() {
+async fn usage_json_prints_the_host_envelope() {
     let dir = unique_dir("usage-json");
-    seed_usage_db(&dir);
+    let responder: Responder = Arc::new(|request| {
+        assert_eq!(request.payload["days"], 7);
+        success(
+            request,
+            usage_report(
+                "last 7 days",
+                json!([]),
+                json!({ "days": 0, "streakDays": 0, "busiest": null }),
+                vec!["No usage recorded last 7 days."],
+            ),
+        )
+    });
+    let _server = serve(&dir, responder);
     let text = execute(
         Command::Usage {
             days: 7,
@@ -1108,7 +931,7 @@ async fn usage_json_shape_is_the_source_envelope() {
     )
     .await
     .unwrap();
-    let parsed: serde_json::Value = serde_json::from_str(&text).expect("valid JSON");
+    let parsed: Value = serde_json::from_str(&text).expect("valid JSON");
     assert_eq!(parsed["label"], "last 7 days");
     assert_eq!(parsed["summary"]["days"], 0);
     assert_eq!(parsed["summary"]["streakDays"], 0);
@@ -1118,6 +941,35 @@ async fn usage_json_shape_is_the_source_envelope() {
             .as_array()
             .is_some_and(|days| days.is_empty())
     );
+    // The machine envelope carries no rendering.
+    assert!(parsed.get("lines").is_none());
+}
+
+#[tokio::test]
+async fn usage_refusal_is_the_daemon_sentence() {
+    let dir = unique_dir("usage-refusal");
+    let responder: Responder = Arc::new(|request| DaemonResponse::Failure {
+        version: DAEMON_PROTOCOL_VERSION,
+        id: request.id.clone(),
+        ok: false,
+        error: "days must be a whole number between 1 and 3650.".to_owned(),
+    });
+    let _server = serve(&dir, responder);
+    let error = execute(
+        Command::Usage {
+            days: 30,
+            session: None,
+            model: None,
+            json: false,
+        },
+        &dir,
+    )
+    .await
+    .expect_err("a refusal is an error");
+    let CliError::Answer(sentence) = error else {
+        panic!("expected the daemon's own sentence, got {error:?}");
+    };
+    assert_eq!(sentence, "days must be a whole number between 1 and 3650.");
 }
 
 // --- setup ----------------------------------------------------------------

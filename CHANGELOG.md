@@ -12,6 +12,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   daemon's `openbutler-daemon` rule: the CLI and the host resolve the
   same directory, and neither touches the legacy Node install's
   `openbutler` data.
+- `openbutler usage` no longer reads `state.db`: the numbers live in the
+  daemon's `usage.report` (the label, the summary, the day buckets and the
+  rendered lines), and the command forwards the flags, prints the lines,
+  and — with `--json` — the host's `{label, summary, days}` envelope
+  unchanged. The CLI's `rusqlite` dependency went with the query.
 
 ### Added
 
