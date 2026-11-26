@@ -7,6 +7,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- `skills` prints the host table or its empty screen; the CLI no longer
+  lays it out.
 - `status` and `sessions` print the host's screens (`DaemonStatus.lines`,
   `SessionListAnswer.lines`); a host that predates the screen says so
   instead of printing nothing. The protocol's `ScreenLine`/`Tone` is the

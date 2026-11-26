@@ -1946,7 +1946,13 @@ async fn skills_renders_the_host_table() {
                         "filePath": "C:\\Users\\me\\.agents\\skills\\beta\\SKILL.md"
                     }
                 ],
-                "roots": []
+                "roots": [],
+                "lines": [
+                    { "tone": "plain", "text": "  NAME   SCOPE      DESCRIPTION        SKILL FILE" },
+                    { "tone": "plain", "text": "  \u{2500}\u{2500}\u{2500}\u{2500}  \u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}  \u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}  \u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}" },
+                    { "tone": "plain", "text": "  alpha  workspace  A workspace skill.  C:\\work\\proj\\.agents\\skills\\alpha\\SKILL.md" },
+                    { "tone": "plain", "text": "  beta   global     A user skill.       C:\\Users\\me\\.agents\\skills\\beta\\SKILL.md" }
+                ]
             }),
         )
     });
@@ -1982,6 +1988,12 @@ async fn skills_without_a_skill_names_the_roots() {
                 "roots": [
                     { "scope": "builtin", "path": "C:\\app\\skills" },
                     { "scope": "global", "path": "C:\\Users\\me\\.agents\\skills" }
+                ],
+                "lines": [
+                    { "tone": "info", "text": "No Agent Skills found." },
+                    { "tone": "plain", "text": "  builtin                C:\\app\\skills" },
+                    { "tone": "plain", "text": "  global                 C:\\Users\\me\\.agents\\skills" },
+                    { "tone": "info", "text": "Add a skill-name/SKILL.md with Agent Skills frontmatter." }
                 ]
             }),
         )
