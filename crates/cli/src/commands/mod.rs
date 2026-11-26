@@ -4,6 +4,7 @@
 
 pub mod config;
 pub mod daemon;
+pub mod ledger;
 pub mod logs;
 pub mod permissions;
 pub mod run;
@@ -31,4 +32,14 @@ pub async fn ask(data_dir: &Path, action: &str) -> Result<Value, CliError> {
         DaemonResponse::Success { result, .. } => Ok(result),
         DaemonResponse::Failure { error, .. } => Err(CliError::Answer(error)),
     }
+}
+
+/// One stateless action carrying a single payload field.
+pub async fn ask_with(
+    data_dir: &Path,
+    action: &str,
+    field: (&str, Value),
+) -> Result<Value, CliError> {
+    let mut client = crate::client::Client::connect(data_dir).await?;
+    daemon::call_fields(&mut client, action, vec![field]).await
 }

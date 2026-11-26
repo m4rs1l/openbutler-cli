@@ -27,6 +27,39 @@ pub struct Cli {
     pub command: Option<Command>,
 }
 
+/// `openbutler events` subcommands (cli-main.ts L1585-1610).
+#[derive(Debug, Clone, clap::Subcommand)]
+pub enum EventsCommand {
+    /// Move a retryable event back to pending.
+    Retry {
+        /// The event id `events` printed.
+        event_id: String,
+    },
+    /// Delete settled events older than a window (preview without `--yes`).
+    Prune {
+        /// A window like 30d, 12h, 90m, or 2w.
+        #[arg(long, value_name = "DURATION")]
+        older_than: String,
+        /// Actually delete (preview otherwise).
+        #[arg(long)]
+        yes: bool,
+    },
+}
+
+/// `openbutler actions` subcommands.
+#[derive(Debug, Clone, clap::Subcommand)]
+pub enum ActionsCommand {
+    /// Delete terminal actions older than a window (preview without `--yes`).
+    Prune {
+        /// A window like 30d, 12h, 90m, or 2w.
+        #[arg(long, value_name = "DURATION")]
+        older_than: String,
+        /// Actually delete (preview otherwise).
+        #[arg(long)]
+        yes: bool,
+    },
+}
+
 /// The S1 command set; the tree grows with each slice.
 #[derive(Debug, Clone, clap::Subcommand)]
 pub enum Command {
@@ -68,6 +101,16 @@ pub enum Command {
         /// Emit the machine-readable report instead of the render.
         #[arg(long)]
         json: bool,
+    },
+    /// Read the durable event ledger.
+    Events {
+        #[command(subcommand)]
+        command: Option<EventsCommand>,
+    },
+    /// Read the durable tool action ledger.
+    Actions {
+        #[command(subcommand)]
+        command: Option<ActionsCommand>,
     },
     /// First-run setup wizard (interactive).
     Setup,
@@ -150,6 +193,8 @@ pub async fn execute(command: Command, data_dir: &std::path::Path) -> Result<Str
     match command {
         Command::Status => commands::status::run(data_dir).await,
         Command::Sessions => commands::sessions::run(data_dir).await,
+        Command::Events { command } => commands::ledger::events(data_dir, command).await,
+        Command::Actions { command } => commands::ledger::actions(data_dir, command).await,
         Command::Daemon { command } => match command.unwrap_or(DaemonCommand::Status) {
             DaemonCommand::Status => commands::daemon::status(data_dir).await,
             DaemonCommand::Stop => commands::daemon::stop(data_dir).await,

@@ -8,7 +8,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-use openbutler_cli::{CliError, Command, DaemonCommand, TokenCommand, execute};
+use openbutler_cli::{
+    ActionsCommand, CliError, Command, DaemonCommand, EventsCommand, TokenCommand, execute,
+};
 use openbutler_protocol::status::TelegramState;
 use openbutler_protocol::{
     DAEMON_PROTOCOL_VERSION, DaemonRequest, DaemonResponse, DaemonStatus, FrameDecoder,
@@ -1716,5 +1718,177 @@ async fn permissions_surfaces_the_daemons_refusal() {
     assert_eq!(
         error.to_string(),
         "--review-timeout must be a whole number of seconds between 5 and 600."
+    );
+}
+// ------------------------------------------------------- events/actions (S3)
+
+#[tokio::test]
+async fn events_lists_the_daemons_rows_as_pretty_json() {
+    let dir = unique_dir("events-list");
+    let responder: Responder = Arc::new(|request: &DaemonRequest| match request.action.as_str() {
+        "ledger.events" => success(
+            request,
+            json!([{ "eventId": "e1", "source": "timer", "status": "delivered" }]),
+        ),
+        other => panic!("unexpected action {other}"),
+    });
+    let _server = serve(&dir, responder);
+
+    let text = execute(Command::Events { command: None }, &dir)
+        .await
+        .unwrap();
+    // JSON.stringify(rows, null, 2): two-space indentation, key order kept.
+    assert_eq!(
+        text,
+        "[\n  {\n    \"eventId\": \"e1\",\n    \"source\": \"timer\",\n    \"status\": \"delivered\"\n  }\n]"
+    );
+}
+
+#[tokio::test]
+async fn events_retry_sends_the_id_and_prints_the_answer() {
+    let dir = unique_dir("events-retry");
+    let seen = Arc::new(std::sync::Mutex::new(None));
+    let responder: Responder = {
+        let seen = seen.clone();
+        Arc::new(
+            move |request: &DaemonRequest| match request.action.as_str() {
+                "events.retry" => {
+                    *seen.lock().unwrap() = Some(Value::Object(request.payload.clone()));
+                    success(request, json!({ "status": "pending" }))
+                }
+                other => panic!("unexpected action {other}"),
+            },
+        )
+    };
+    let _server = serve(&dir, responder);
+
+    let text = execute(
+        Command::Events {
+            command: Some(EventsCommand::Retry {
+                event_id: "e1".to_owned(),
+            }),
+        },
+        &dir,
+    )
+    .await
+    .unwrap();
+    assert_eq!(text, "{\n  \"status\": \"pending\"\n}");
+    assert_eq!(
+        seen.lock().unwrap().clone(),
+        Some(json!({ "eventId": "e1" }))
+    );
+}
+
+#[tokio::test]
+async fn prune_previews_with_the_source_lines() {
+    let dir = unique_dir("events-prune-preview");
+    let seen = Arc::new(std::sync::Mutex::new(None));
+    let responder: Responder = {
+        let seen = seen.clone();
+        Arc::new(
+            move |request: &DaemonRequest| match request.action.as_str() {
+                "ledger.prune" => {
+                    *seen.lock().unwrap() = Some(Value::Object(request.payload.clone()));
+                    success(
+                        request,
+                        json!({ "events": 2, "actions": 1, "transitions": 3 }),
+                    )
+                }
+                other => panic!("unexpected action {other}"),
+            },
+        )
+    };
+    let _server = serve(&dir, responder);
+
+    let preview = execute(
+        Command::Events {
+            command: Some(EventsCommand::Prune {
+                older_than: "30d".to_owned(),
+                yes: false,
+            }),
+        },
+        &dir,
+    )
+    .await
+    .unwrap();
+    let lines: Vec<&str> = preview.lines().collect();
+    assert_eq!(lines[0], "  2 event(s), 1 action(s), 3 transition(s)");
+    assert_eq!(
+        lines[1],
+        "\u{b7} Nothing was deleted; re-run with --yes to delete these 6 record(s)."
+    );
+    assert_eq!(
+        seen.lock().unwrap().clone(),
+        Some(json!({ "kind": "events", "olderThan": "30d", "apply": false }))
+    );
+}
+
+#[tokio::test]
+async fn prune_applies_with_the_success_line() {
+    let dir = unique_dir("events-prune-apply");
+    let seen = Arc::new(std::sync::Mutex::new(None));
+    let responder: Responder = {
+        let seen = seen.clone();
+        Arc::new(
+            move |request: &DaemonRequest| match request.action.as_str() {
+                "ledger.prune" => {
+                    *seen.lock().unwrap() = Some(Value::Object(request.payload.clone()));
+                    success(
+                        request,
+                        json!({ "events": 0, "actions": 4, "transitions": 2 }),
+                    )
+                }
+                other => panic!("unexpected action {other}"),
+            },
+        )
+    };
+    let _server = serve(&dir, responder);
+
+    let applied = execute(
+        Command::Actions {
+            command: Some(ActionsCommand::Prune {
+                older_than: "30d".to_owned(),
+                yes: true,
+            }),
+        },
+        &dir,
+    )
+    .await
+    .unwrap();
+    let lines: Vec<&str> = applied.lines().collect();
+    assert_eq!(lines[0], "  0 event(s), 4 action(s), 2 transition(s)");
+    assert_eq!(lines[1], "\u{2714} Pruned 6 record(s).");
+    assert_eq!(
+        seen.lock().unwrap().clone(),
+        Some(json!({ "kind": "actions", "olderThan": "30d", "apply": true }))
+    );
+}
+
+#[tokio::test]
+async fn prune_with_nothing_to_delete_says_so() {
+    let dir = unique_dir("events-prune-empty");
+    let responder: Responder = Arc::new(|request: &DaemonRequest| match request.action.as_str() {
+        "ledger.prune" => success(
+            request,
+            json!({ "events": 0, "actions": 0, "transitions": 0 }),
+        ),
+        other => panic!("unexpected action {other}"),
+    });
+    let _server = serve(&dir, responder);
+
+    let text = execute(
+        Command::Actions {
+            command: Some(ActionsCommand::Prune {
+                older_than: "12h".to_owned(),
+                yes: false,
+            }),
+        },
+        &dir,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        text,
+        "\u{b7} No actions records are older than 12h; nothing to prune."
     );
 }
