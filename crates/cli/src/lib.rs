@@ -73,6 +73,20 @@ pub enum Command {
     Setup,
     /// The manager screen: providers, default model, readiness.
     Config,
+    /// The approval posture: mode, timeouts, review model.
+    Permissions {
+        /// workspace | auto-review | full-access (bare: show the current one).
+        mode: Option<String>,
+        /// Auto-review verdict timeout in seconds (5-600).
+        #[arg(long, value_name = "SECONDS")]
+        review_timeout: Option<u64>,
+        /// Tool-approval timeout in seconds (5-600).
+        #[arg(long, value_name = "SECONDS")]
+        approval_timeout: Option<u64>,
+        /// Reviewer model `<provider>/<model>`, or `none` for the main model.
+        #[arg(long, value_name = "PROVIDER/MODEL")]
+        review_model: Option<String>,
+    },
     /// The interactive session (needs a real terminal).
     Tui,
 }
@@ -163,6 +177,21 @@ pub async fn execute(command: Command, data_dir: &std::path::Path) -> Result<Str
         // gets the refusal sentence and no prompts.
         Command::Setup => commands::setup::run(data_dir).await.map(|()| String::new()),
         Command::Config => commands::config::run(data_dir).await,
+        Command::Permissions {
+            mode,
+            review_timeout,
+            approval_timeout,
+            review_model,
+        } => {
+            commands::permissions::run(
+                data_dir,
+                mode,
+                review_timeout,
+                approval_timeout,
+                review_model,
+            )
+            .await
+        }
         // The TUI owns the terminal; through this buffered path the guard
         // fires first, so a non-terminal caller gets the refusal sentence.
         Command::Tui => crate::tui::run(data_dir).await.map(|()| String::new()),

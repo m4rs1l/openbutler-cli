@@ -1572,3 +1572,149 @@ async fn daemon_token_revoke_surfaces_the_daemons_refusal() {
         "No token with id abc. List them with `openbutler daemon token list`."
     );
 }
+// --------------------------------------------------- permissions (S3)
+
+fn permissions_command(
+    mode: Option<&str>,
+    review_timeout: Option<u64>,
+    approval_timeout: Option<u64>,
+    review_model: Option<&str>,
+) -> Command {
+    Command::Permissions {
+        mode: mode.map(str::to_owned),
+        review_timeout,
+        approval_timeout,
+        review_model: review_model.map(str::to_owned),
+    }
+}
+
+fn permissions_defaults() -> Value {
+    json!({
+        "mode": "Workspace (default)",
+        "reviewTimeout": "15 seconds (default)",
+        "approvalTimeout": "120 seconds (default)",
+        "reviewModel": "(main model)",
+        "saved": []
+    })
+}
+
+#[tokio::test]
+async fn permissions_renders_the_four_values_and_the_two_explanations() {
+    let dir = unique_dir("permissions-report");
+    let seen = Arc::new(std::sync::Mutex::new(None));
+    let responder: Responder = {
+        let seen = seen.clone();
+        Arc::new(move |request: &DaemonRequest| {
+            *seen.lock().unwrap() = Some(Value::Object(request.payload.clone()));
+            success(request, permissions_defaults())
+        })
+    };
+    let _server = serve(&dir, responder);
+
+    let text = execute(permissions_command(None, None, None, None), &dir)
+        .await
+        .unwrap();
+    let lines: Vec<&str> = text.lines().collect();
+    assert_eq!(lines[0][2..25].trim_end(), "Current mode");
+    assert_eq!(&lines[0][25..], "Workspace (default)");
+    assert_eq!(lines[1][2..25].trim_end(), "Auto-review timeout");
+    assert_eq!(&lines[1][25..], "15 seconds (default)");
+    assert_eq!(lines[2][2..25].trim_end(), "Approval timeout");
+    assert_eq!(&lines[2][25..], "120 seconds (default)");
+    assert_eq!(lines[3][2..25].trim_end(), "Auto-review model");
+    assert_eq!(&lines[3][25..], "(main model)");
+    assert_eq!(
+        lines[4],
+        "\u{b7} Workspace paths run without prompts. Auto-review asks the selected model about actions outside the workspace."
+    );
+    assert_eq!(
+        lines[5],
+        "\u{b7} Use `openbutler permissions full-access` to disable tool permission prompts."
+    );
+    assert_eq!(lines.len(), 6, "a bare call prints the two info lines only");
+    assert_eq!(
+        seen.lock().unwrap().clone(),
+        Some(json!({})),
+        "a bare call carries no fields"
+    );
+}
+
+#[tokio::test]
+async fn permissions_sends_every_flag_and_prints_the_success_lines() {
+    let dir = unique_dir("permissions-set");
+    let seen = Arc::new(std::sync::Mutex::new(None));
+    let responder: Responder = {
+        let seen = seen.clone();
+        Arc::new(move |request: &DaemonRequest| {
+            *seen.lock().unwrap() = Some(Value::Object(request.payload.clone()));
+            success(
+                request,
+                json!({
+                    "mode": "Approve for me (Auto-review outside workspace)",
+                    "reviewTimeout": "45 seconds",
+                    "approvalTimeout": "30 seconds",
+                    "reviewModel": "mock/model-x",
+                    "saved": ["mode", "reviewTimeout", "approvalTimeout", "reviewModel"]
+                }),
+            )
+        })
+    };
+    let _server = serve(&dir, responder);
+
+    let text = execute(
+        permissions_command(
+            Some("auto-review"),
+            Some(45),
+            Some(30),
+            Some("mock/model-x"),
+        ),
+        &dir,
+    )
+    .await
+    .unwrap();
+    let lines: Vec<&str> = text.lines().collect();
+    assert_eq!(
+        seen.lock().unwrap().clone(),
+        Some(json!({
+            "mode": "auto-review",
+            "reviewTimeoutSeconds": 45,
+            "approvalTimeoutSeconds": 30,
+            "reviewModel": "mock/model-x"
+        }))
+    );
+    assert_eq!(
+        &lines[0][25..],
+        "Approve for me (Auto-review outside workspace)"
+    );
+    assert_eq!(
+        lines[6],
+        "\u{2714} Saved Approve for me (Auto-review outside workspace) mode."
+    );
+    assert_eq!(lines[7], "\u{2714} Auto-review timeout set to 45 seconds.");
+    assert_eq!(lines[8], "\u{2714} Approval timeout set to 30 seconds.");
+    assert_eq!(lines[9], "\u{2714} Auto-review model set to mock/model-x.");
+    assert_eq!(
+        lines[10],
+        "\u{b7} Restart the host for the reviewer model to take effect: openbutler daemon restart"
+    );
+}
+
+#[tokio::test]
+async fn permissions_surfaces_the_daemons_refusal() {
+    let dir = unique_dir("permissions-refusal");
+    let responder: Responder = Arc::new(|request: &DaemonRequest| DaemonResponse::Failure {
+        version: DAEMON_PROTOCOL_VERSION,
+        id: request.id.clone(),
+        ok: false,
+        error: "--review-timeout must be a whole number of seconds between 5 and 600.".to_owned(),
+    });
+    let _server = serve(&dir, responder);
+
+    let error = execute(permissions_command(None, Some(4), None, None), &dir)
+        .await
+        .unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "--review-timeout must be a whole number of seconds between 5 and 600."
+    );
+}

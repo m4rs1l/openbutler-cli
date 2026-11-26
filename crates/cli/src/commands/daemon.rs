@@ -413,9 +413,20 @@ async fn call_on(
     action: &str,
     payload: Option<(&str, serde_json::Value)>,
 ) -> Result<serde_json::Value, CliError> {
+    let fields: Vec<(&str, serde_json::Value)> = payload.into_iter().collect();
+    call_fields(client, action, fields).await
+}
+
+/// One request with any number of payload fields (the envelope flattens
+/// them), answered as the daemon's payload.
+pub(crate) async fn call_fields(
+    client: &mut crate::client::Client,
+    action: &str,
+    fields: Vec<(&str, serde_json::Value)>,
+) -> Result<serde_json::Value, CliError> {
     let mut request =
         openbutler_protocol::DaemonRequest::new(uuid::Uuid::new_v4().to_string(), action);
-    if let Some((key, value)) = payload {
+    for (key, value) in fields {
         request.payload.insert(key.to_owned(), value);
     }
     match client.call(&request).await? {

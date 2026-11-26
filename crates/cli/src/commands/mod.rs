@@ -5,6 +5,7 @@
 pub mod config;
 pub mod daemon;
 pub mod logs;
+pub mod permissions;
 pub mod run;
 pub mod sessions;
 pub mod setup;

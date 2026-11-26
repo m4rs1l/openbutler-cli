@@ -15,6 +15,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- `openbutler permissions [workspace|auto-review|full-access]
+  [--review-timeout N] [--approval-timeout N] [--review-model P/M|none]` —
+  one `permissions.manage` call carries every provided flag; the screen is
+  the source's (four `kv` values, two explanations, one success line per
+  flag, the restart note naming `openbutler daemon restart`). The
+  auto-review history section is not ported — no verdicts are recorded in
+  this build. Pins: the bare render (value byte 25, line count), the full
+  payload (`{mode, reviewTimeoutSeconds, approvalTimeoutSeconds,
+  reviewModel}`) with its success lines, and the refusal pass-through.
+  Verified live: bare, set, invalid-value refusal, stop.
+
 - `openbutler daemon token [create|list|revoke <id>]` — remote auth tokens
   (bare `token` lists). The source's four `create` lines, one `kv` row per
   token for `list` (or the source's empty note), `Token <id> revoked.` for
