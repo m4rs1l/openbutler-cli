@@ -97,6 +97,15 @@ pub enum Command {
     },
     /// Read the machine log's tail.
     Logs {
+        /// error | warn | info | debug (host records only).
+        #[arg(long)]
+        level: Option<String>,
+        /// Exact event name, e.g. host.started.
+        #[arg(long)]
+        event: Option<String>,
+        /// Print the raw JSON records instead of the human line.
+        #[arg(long = "json")]
+        json: bool,
         /// How many tail lines to show.
         #[arg(long, default_value_t = 100, value_parser = clap::value_parser!(u32).range(1..=100_000))]
         lines: u32,
@@ -283,7 +292,13 @@ pub async fn execute(command: Command, data_dir: &std::path::Path) -> Result<Str
                 commands::daemon::start(data_dir, listen, no_listen).await
             }
         },
-        Command::Logs { lines, file } => commands::logs::run(data_dir, lines as usize, file).await,
+        Command::Logs {
+            lines,
+            file,
+            level,
+            event,
+            json,
+        } => commands::logs::run(data_dir, lines as usize, file, level, event, json).await,
         Command::Usage {
             days,
             session,

@@ -823,6 +823,9 @@ async fn logs_prints_the_host_lines() {
         Command::Logs {
             lines: 2,
             file: None,
+            level: None,
+            event: None,
+            json: false,
         },
         &dir,
     )
@@ -861,6 +864,9 @@ async fn logs_forwards_an_absolute_file_without_a_second_decision() {
         Command::Logs {
             lines: 100,
             file: Some(std::path::PathBuf::from("relative.log")),
+            level: None,
+            event: None,
+            json: false,
         },
         &dir,
     )
@@ -894,6 +900,9 @@ async fn logs_surfaces_the_hosts_refusal() {
         Command::Logs {
             lines: 100,
             file: None,
+            level: None,
+            event: None,
+            json: false,
         },
         &dir,
     )

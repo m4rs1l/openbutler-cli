@@ -28,6 +28,9 @@ pub async fn run(
     data_dir: &Path,
     lines: usize,
     file: Option<std::path::PathBuf>,
+    level: Option<String>,
+    event: Option<String>,
+    raw: bool,
 ) -> Result<String, CliError> {
     let mut fields: Vec<(&str, serde_json::Value)> = vec![("lines", json!(lines))];
     if let Some(file) = file {
@@ -36,6 +39,16 @@ pub async fn run(
         // refuses it with its own sentence.
         let absolute = std::path::absolute(&file).unwrap_or(file);
         fields.push(("file", json!(absolute.to_string_lossy())));
+    }
+
+    if let Some(level) = level {
+        fields.push(("level", json!(level)));
+    }
+    if let Some(event) = event {
+        fields.push(("event", json!(event)));
+    }
+    if raw {
+        fields.push(("format", json!("json")));
     }
 
     let mut client = crate::client::Client::connect(data_dir).await?;

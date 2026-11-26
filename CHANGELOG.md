@@ -21,6 +21,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   when there is none. The payload field is `command` because the envelope
   already owns `action` (a payload key of the same name fails to decode).
 
+### Added
+
+
+- `openbutler logs --level --event --json`: the filters travel to the host
+  (`logs.tail`), which selects and formats the records.
+
 ### Changed
 
 - `skills` prints the host table or its empty screen; the CLI no longer
