@@ -240,6 +240,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The background host is spawned with this CLI's data directory. The child
+  inherited the environment and resolved its own directory, so an overridden
+  directory left the CLI probing an endpoint nothing was serving; the spawn
+  now sets OPENBUTLER_DATA_DIR the way the foreground path already did.
+
 - The framed client keeps every frame a socket read completes. One read can
   carry a burst (the host writes a response and the events behind it back to
   back); only the first frame was returned, so a run could lose its final

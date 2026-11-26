@@ -500,24 +500,12 @@ async fn spawn_and_wait(
         retryable: false,
     })?;
 
-    let mut command = std::process::Command::new(exe);
+    let mut command = background_command(data_dir, exe, listen, no_listen, web);
     command
-        .arg("run")
         .current_dir(data_dir)
         .stdin(Stdio::null())
         .stdout(Stdio::from(log))
         .stderr(Stdio::from(stderr_handle));
-    // The cold-start preference goes straight to the child: the host's
-    // write-only state is the daemon's, so the flag cannot be persisted
-    // before the host exists.
-    if let Some(spec) = listen {
-        command.arg("--listen").arg(spec);
-    } else if no_listen {
-        command.arg("--no-listen");
-    }
-    if web {
-        command.arg("--web");
-    }
 
     #[cfg(unix)]
     command.process_group(0);
@@ -570,6 +558,33 @@ async fn spawn_and_wait(
         }
         tokio::time::sleep(Duration::from_millis(250)).await;
     }
+}
+
+/// The background child's command line: the host verb, the cold-start
+/// preference, and the data directory this CLI resolved. The child inherits
+/// the environment, so the explicit value is what keeps an overridden
+/// directory authoritative - the same rule `run_foreground_with` follows.
+fn background_command(
+    data_dir: &Path,
+    exe: &Path,
+    listen: Option<&str>,
+    no_listen: bool,
+    web: bool,
+) -> std::process::Command {
+    let mut command = std::process::Command::new(exe);
+    command.arg("run").env("OPENBUTLER_DATA_DIR", data_dir);
+    // The cold-start preference goes straight to the child: the host's
+    // write-only state is the daemon's, so the flag cannot be persisted
+    // before the host exists.
+    if let Some(spec) = listen {
+        command.arg("--listen").arg(spec);
+    } else if no_listen {
+        command.arg("--no-listen");
+    }
+    if web {
+        command.arg("--web");
+    }
+    command
 }
 
 /// The source's early-death diagnosis: an allocation failure names the
@@ -755,6 +770,35 @@ async fn status_pid(data_dir: &Path) -> Result<u32, CliError> {
 #[cfg(test)]
 mod tests {
     use super::render_restarted;
+
+    /// The background child must resolve the same data directory this CLI
+    /// resolved, and its cold-start flags must reach it as arguments.
+    #[test]
+    fn the_background_child_gets_this_data_directory_and_flags() {
+        use std::ffi::OsStr;
+
+        let dir = std::path::Path::new("C:\\fixture\\data");
+        let exe = std::path::Path::new("openbutler-daemon.exe");
+        let command = super::background_command(dir, exe, Some("127.0.0.1:7777"), false, true);
+        let envs: Vec<(&OsStr, Option<&OsStr>)> = command.get_envs().collect();
+        assert!(
+            envs.iter().any(|(key, value)| *key == "OPENBUTLER_DATA_DIR"
+                && *value == Some(OsStr::new("C:\\fixture\\data"))),
+            "the child must be pointed at this CLI's data directory: {envs:?}"
+        );
+        let args: Vec<String> = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(args, vec!["run", "--listen", "127.0.0.1:7777", "--web"]);
+
+        let cleared = super::background_command(dir, exe, None, true, false);
+        let args: Vec<String> = cleared
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(args, vec!["run", "--no-listen"]);
+    }
 
     /// The two closing lines (cli-main.ts L1677/L1683); reaching them
     /// through the command needs a live host, so the text is pinned here.
