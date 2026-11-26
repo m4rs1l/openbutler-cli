@@ -38,13 +38,7 @@ async fn list(data_dir: &Path) -> Result<String, CliError> {
 /// The host's prune answer: finished lines, each with the tone it chose.
 #[derive(Deserialize)]
 struct PruneAnswer {
-    lines: Vec<ToneLine>,
-}
-
-#[derive(Deserialize)]
-struct ToneLine {
-    tone: String,
-    text: String,
+    lines: Vec<crate::ui::ScreenLine>,
 }
 
 /// Asks the host to prune and prints exactly what it answers.
@@ -61,12 +55,7 @@ async fn prune(data_dir: &Path, older_than: &str, yes: bool) -> Result<String, C
             action: "sessions.prune",
             source,
         })?;
-    Ok(answer
-        .lines
-        .iter()
-        .map(|line| crate::ui::toned(&line.tone, &line.text))
-        .collect::<Vec<_>>()
-        .join("\n"))
+    Ok(crate::ui::screen(&answer.lines))
 }
 
 /// Renders the list the daemon computed: full id first (scripts select by

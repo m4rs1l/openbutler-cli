@@ -52,6 +52,22 @@ pub fn toned(tone: &str, text: &str) -> String {
     }
 }
 
+/// One line the host composed (the wire shape of `lines` entries).
+#[derive(Debug, serde::Deserialize)]
+pub struct ScreenLine {
+    pub tone: String,
+    pub text: String,
+}
+
+/// Prints the host's lines through this client's glyph palette.
+pub fn screen(lines: &[ScreenLine]) -> String {
+    lines
+        .iter()
+        .map(|line| toned(&line.tone, &line.text))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// `ui.table` (ui.ts L42-61): header, a rule of column widths, then rows —
 /// two spaces between columns, columns sized to their widest cell. An empty
 /// row set prints the source's `(nothing to show)` line.

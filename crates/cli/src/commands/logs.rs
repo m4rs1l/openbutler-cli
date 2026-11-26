@@ -1,63 +1,48 @@
-//! `openbutler logs` — read the machine log's tail without opening a
-//! file.
+//! `openbutler logs` — the machine log's tail, read by the host.
 //!
-//! The source reads the structured `logs/openbutler.log` and filters
-//! parsed records by level/event; this build's daemon writes no
-//! structured file yet, so the honest machine log is the `daemon.log`
-//! that `daemon start` captures — raw lines, `--lines` tailing and
-//! `--file` override from the source, level/event/json filtering
-//! deferred with the daemon-side structured logger (documented).
+//! Source: `cli-main.ts` `runLogs`. The source read the file in the CLI
+//! process; this build's daemon writes no structured file yet, so the honest
+//! machine log is the `daemon.log` that `daemon start` captures. The read now
+//! happens where the file lives (`logs.tail`), and this module prints the
+//! lines the host returns.
+//!
+//! `--file` is resolved against the caller's shell directory here and must
+//! reach the host absolute: the host's working directory is not the one the
+//! owner typed the command in.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
+
+use serde::Deserialize;
+use serde_json::json;
 
 use crate::CliError;
 
-/// Reads the log tail: the daemon's own captured output by default, or
-/// `--file` verbatim.
-pub async fn run(data_dir: &Path, lines: usize, file: Option<PathBuf>) -> Result<String, CliError> {
-    let path = file.unwrap_or_else(|| data_dir.join("daemon.log"));
-    // The source treats an unreadable file as empty records.
-    let records = tail_lines(&path, lines).unwrap_or_default();
-    if records.is_empty() {
-        return Ok(format!("No log lines at {}.", path.display()));
-    }
-    Ok(records.join("\n"))
+/// The host's answer: finished lines, each with the tone it chose.
+#[derive(Deserialize)]
+struct TailAnswer {
+    lines: Vec<crate::ui::ScreenLine>,
 }
 
-/// Tail by seeking: blocks are read backwards until the wanted newline
-/// count is covered, so a large log costs its tail, not its size (the
-/// source read the whole file into memory).
-fn tail_lines(path: &Path, lines: usize) -> std::io::Result<Vec<String>> {
-    use std::io::{Read, Seek, SeekFrom};
-
-    let mut file = std::fs::File::open(path)?;
-    let size = file.metadata()?.len();
-    const BLOCK: u64 = 64 * 1024;
-
-    let mut position = size;
-    let mut newlines = 0usize;
-    let mut chunks: Vec<Vec<u8>> = Vec::new();
-    while position > 0 && newlines <= lines {
-        let start = position.saturating_sub(BLOCK);
-        let mut block = vec![0u8; (position - start) as usize];
-        file.seek(SeekFrom::Start(start))?;
-        file.read_exact(&mut block)?;
-        newlines += block.iter().filter(|byte| **byte == b'\n').count();
-        chunks.insert(0, block);
-        position = start;
+/// Asks the host for the tail and prints exactly what it answers.
+pub async fn run(
+    data_dir: &Path,
+    lines: usize,
+    file: Option<std::path::PathBuf>,
+) -> Result<String, CliError> {
+    let mut fields: Vec<(&str, serde_json::Value)> = vec![("lines", json!(lines))];
+    if let Some(file) = file {
+        // The caller's directory is the only correct base for a relative path;
+        // a path that cannot be made absolute travels as typed and the host
+        // refuses it with its own sentence.
+        let absolute = std::path::absolute(&file).unwrap_or(file);
+        fields.push(("file", json!(absolute.to_string_lossy())));
     }
 
-    let mut data = Vec::new();
-    for chunk in chunks {
-        data.extend(chunk);
-    }
-    let text = String::from_utf8_lossy(&data);
-    let mut records: Vec<String> = text
-        .split('\n')
-        .map(|line| line.strip_suffix('\r').unwrap_or(line).to_owned())
-        .collect();
-    if records.last().is_some_and(|line| line.is_empty()) {
-        records.pop();
-    }
-    Ok(records.split_off(records.len().saturating_sub(lines)))
+    let mut client = crate::client::Client::connect(data_dir).await?;
+    let result = crate::commands::daemon::call_fields(&mut client, "logs.tail", fields).await?;
+    let answer: TailAnswer = serde_json::from_value(result).map_err(|source| CliError::Decode {
+        action: "logs.tail",
+        source,
+    })?;
+    Ok(crate::ui::screen(&answer.lines))
 }

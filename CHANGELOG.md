@@ -7,6 +7,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- `openbutler logs` and `openbutler permissions` no longer decide anything:
+  the host reads the log file (`logs.tail`, absolute path, local-only) and
+  composes the permissions screen (`lines` with tones). The client applies
+  its glyph palette (`ui::screen`) and prints.
 - The installed binary is `openbutler` (`[[bin]] name` — the package
   keeps the repo name), and the default data directory mirrors the
   daemon's `openbutler-daemon` rule: the CLI and the host resolve the

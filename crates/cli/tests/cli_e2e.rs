@@ -761,32 +761,103 @@ async fn daemon_start_reports_a_missing_daemon_executable() {
 // ------------------------------------------------- machine log (S3)
 
 #[tokio::test]
-async fn logs_tails_the_machine_log() {
+async fn logs_prints_the_host_lines() {
     let dir = unique_dir("logs-tail");
-    std::fs::create_dir_all(&dir).unwrap();
-    // CRLF like a Windows child writes.
-    std::fs::write(
-        dir.join("daemon.log"),
-        "one\r\ntwo\r\nthree\r\nfour\r\nfive\r\n",
-    )
-    .unwrap();
+    let seen = Arc::new(std::sync::Mutex::new(None));
+    let responder: Responder = {
+        let seen = seen.clone();
+        Arc::new(
+            move |request: &DaemonRequest| match request.action.as_str() {
+                "logs.tail" => {
+                    *seen.lock().unwrap() = Some(Value::Object(request.payload.clone()));
+                    success(
+                        request,
+                        json!({
+                            "lines": [
+                                { "tone": "plain", "text": "three" },
+                                { "tone": "plain", "text": "four" }
+                            ]
+                        }),
+                    )
+                }
+                other => panic!("unexpected action {other}"),
+            },
+        )
+    };
+    let _server = serve(&dir, responder);
 
     let text = execute(
         Command::Logs {
-            lines: 3,
+            lines: 2,
             file: None,
         },
         &dir,
     )
     .await
     .unwrap();
-    assert_eq!(text, "three\nfour\nfive");
+    assert_eq!(text, "three\nfour");
+    assert_eq!(seen.lock().unwrap().clone(), Some(json!({ "lines": 2 })));
 }
 
 #[tokio::test]
-async fn logs_on_a_missing_file_says_so() {
-    let dir = unique_dir("logs-missing");
+async fn logs_forwards_an_absolute_file_without_a_second_decision() {
+    let dir = unique_dir("logs-file");
+    let seen = Arc::new(std::sync::Mutex::new(None));
+    let responder: Responder = {
+        let seen = seen.clone();
+        Arc::new(
+            move |request: &DaemonRequest| match request.action.as_str() {
+                "logs.tail" => {
+                    *seen.lock().unwrap() = Some(Value::Object(request.payload.clone()));
+                    success(
+                        request,
+                        json!({
+                            "lines": [
+                                { "tone": "info", "text": "No log lines at C:\\elsewhere\\a.log." }
+                            ]
+                        }),
+                    )
+                }
+                other => panic!("unexpected action {other}"),
+            },
+        )
+    };
+    let _server = serve(&dir, responder);
+
     let text = execute(
+        Command::Logs {
+            lines: 100,
+            file: Some(std::path::PathBuf::from("relative.log")),
+        },
+        &dir,
+    )
+    .await
+    .unwrap();
+    assert_eq!(text, "\u{b7} No log lines at C:\\elsewhere\\a.log.");
+    let payload = seen.lock().unwrap().clone().unwrap();
+    let forwarded = payload["file"].as_str().unwrap().to_owned();
+    assert!(
+        std::path::Path::new(&forwarded).is_absolute(),
+        "the caller's directory is the base: {forwarded}"
+    );
+    assert!(forwarded.ends_with("relative.log"), "{forwarded}");
+}
+
+#[tokio::test]
+async fn logs_surfaces_the_hosts_refusal() {
+    let dir = unique_dir("logs-refusal");
+    let responder: Responder = Arc::new(|request: &DaemonRequest| match request.action.as_str() {
+        "logs.tail" => DaemonResponse::Failure {
+            version: DAEMON_PROTOCOL_VERSION,
+            id: request.id.clone(),
+            ok: false,
+            error: "Log files are read on the host machine only.".to_owned(),
+        },
+        other => panic!("unexpected action {other}"),
+    });
+    let _server = serve(&dir, responder);
+
+    let error = execute(
         Command::Logs {
             lines: 100,
             file: None,
@@ -794,10 +865,10 @@ async fn logs_on_a_missing_file_says_so() {
         &dir,
     )
     .await
-    .unwrap();
+    .unwrap_err();
     assert_eq!(
-        text,
-        format!("No log lines at {}.", dir.join("daemon.log").display())
+        error.to_string(),
+        "Log files are read on the host machine only."
     );
 }
 
@@ -1453,11 +1524,14 @@ fn permissions_command(
 
 fn permissions_defaults() -> Value {
     json!({
-        "mode": "Workspace (default)",
-        "reviewTimeout": "15 seconds (default)",
-        "approvalTimeout": "120 seconds (default)",
-        "reviewModel": "(main model)",
-        "saved": []
+        "lines": [
+            { "tone": "plain", "text": "  Current mode           Workspace (default)" },
+            { "tone": "plain", "text": "  Auto-review timeout    15 seconds (default)" },
+            { "tone": "plain", "text": "  Approval timeout       120 seconds (default)" },
+            { "tone": "plain", "text": "  Auto-review model      (main model)" },
+            { "tone": "info", "text": "Workspace paths run without prompts. Auto-review asks the selected model about actions outside the workspace." },
+            { "tone": "info", "text": "Use `openbutler permissions full-access` to disable tool permission prompts." }
+        ]
     })
 }
 
@@ -1513,11 +1587,19 @@ async fn permissions_sends_every_flag_and_prints_the_success_lines() {
             success(
                 request,
                 json!({
-                    "mode": "Approve for me (Auto-review outside workspace)",
-                    "reviewTimeout": "45 seconds",
-                    "approvalTimeout": "30 seconds",
-                    "reviewModel": "mock/model-x",
-                    "saved": ["mode", "reviewTimeout", "approvalTimeout", "reviewModel"]
+                    "lines": [
+                        { "tone": "plain", "text": "  Current mode           Approve for me (Auto-review outside workspace)" },
+                        { "tone": "plain", "text": "  Auto-review timeout    45 seconds" },
+                        { "tone": "plain", "text": "  Approval timeout       30 seconds" },
+                        { "tone": "plain", "text": "  Auto-review model      mock/model-x" },
+                        { "tone": "info", "text": "Workspace paths run without prompts. Auto-review asks the selected model about actions outside the workspace." },
+                        { "tone": "info", "text": "Use `openbutler permissions full-access` to disable tool permission prompts." },
+                        { "tone": "success", "text": "Saved Approve for me (Auto-review outside workspace) mode." },
+                        { "tone": "success", "text": "Auto-review timeout set to 45 seconds." },
+                        { "tone": "success", "text": "Approval timeout set to 30 seconds." },
+                        { "tone": "success", "text": "Auto-review model set to mock/model-x." },
+                        { "tone": "info", "text": "Restart the host for the reviewer model to take effect: openbutler daemon restart" }
+                    ]
                 }),
             )
         })
