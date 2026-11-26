@@ -43,27 +43,25 @@ pub fn failure(text: &str) -> String {
 /// A line the host composed, with the tone it chose. The host decides which
 /// sentence is said and how it reads; this palette is the client's — the
 /// same split `usage.report` makes with finished lines.
-pub fn toned(tone: &str, text: &str) -> String {
+pub fn toned(tone: openbutler_protocol::Tone, text: &str) -> String {
     match tone {
-        "info" => info(text),
-        "success" => success(text),
-        "warn" => warn(text),
-        _ => text.to_owned(),
+        openbutler_protocol::Tone::Info => info(text),
+        openbutler_protocol::Tone::Success => success(text),
+        openbutler_protocol::Tone::Warn => warn(text),
+        openbutler_protocol::Tone::Failure => failure(text),
+        openbutler_protocol::Tone::Plain => text.to_owned(),
     }
 }
 
-/// One line the host composed (the wire shape of `lines` entries).
-#[derive(Debug, serde::Deserialize)]
-pub struct ScreenLine {
-    pub tone: String,
-    pub text: String,
-}
+/// One line the host composed — the protocol's type, so the wire shape has
+/// exactly one definition.
+pub use openbutler_protocol::ScreenLine;
 
 /// Prints the host's lines through this client's glyph palette.
 pub fn screen(lines: &[ScreenLine]) -> String {
     lines
         .iter()
-        .map(|line| toned(&line.tone, &line.text))
+        .map(|line| toned(line.tone, &line.text))
         .collect::<Vec<_>>()
         .join("\n")
 }

@@ -9,7 +9,7 @@
 
 use std::path::Path;
 
-use openbutler_protocol::SessionSummary;
+use openbutler_protocol::SessionListAnswer;
 use serde::Deserialize;
 use serde_json::json;
 
@@ -24,15 +24,15 @@ pub async fn run(data_dir: &Path, command: Option<SessionsCommand>) -> Result<St
     }
 }
 
-/// Fetches `session.list` and renders every row.
+/// Fetches `session.list` and prints the host's screen.
 async fn list(data_dir: &Path) -> Result<String, CliError> {
     let result = super::ask(data_dir, "session.list").await?;
-    let sessions: Vec<SessionSummary> =
+    let answer: SessionListAnswer =
         serde_json::from_value(result).map_err(|source| CliError::Decode {
             action: "session.list",
             source,
         })?;
-    Ok(render(&sessions))
+    Ok(crate::ui::screen(&answer.lines))
 }
 
 /// The host's prune answer: finished lines, each with the tone it chose.
@@ -56,31 +56,4 @@ async fn prune(data_dir: &Path, older_than: &str, yes: bool) -> Result<String, C
             source,
         })?;
     Ok(crate::ui::screen(&answer.lines))
-}
-
-/// Renders the list the daemon computed: full id first (scripts select by
-/// it), then activity, model, title, and the running marker when the host
-/// reports one.
-fn render(sessions: &[SessionSummary]) -> String {
-    if sessions.is_empty() {
-        return "No sessions.".to_owned();
-    }
-    sessions
-        .iter()
-        .map(|session| {
-            let running = match session.running {
-                Some(true) => " [running]",
-                _ => "",
-            };
-            format!(
-                "{}  {}  {}/{}{running}  {}",
-                session.id,
-                session.updated_at,
-                session.provider_id,
-                session.model_id,
-                session.title
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
 }

@@ -7,6 +7,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- `status` and `sessions` print the host's screens (`DaemonStatus.lines`,
+  `SessionListAnswer.lines`); a host that predates the screen says so
+  instead of printing nothing. The protocol's `ScreenLine`/`Tone` is the
+  one line shape, and `ui::screen` is the one glyph palette.
 - `about` and `config` print the host's finished lines; the CLI no longer
   lays out either screen (the config layout — sections, provider table,
   readiness block — left this crate for the host).

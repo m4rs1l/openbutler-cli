@@ -116,6 +116,16 @@ async fn status_renders_the_host_report_line_by_line() {
             unresponsive: None,
             entry: Some("dist/index.js".to_owned()),
             build_id: Some(None),
+            lines: vec![
+                openbutler_protocol::ScreenLine::plain("pid:           4242"),
+                openbutler_protocol::ScreenLine::plain("started:       2026-11-22T01:02:03Z"),
+                openbutler_protocol::ScreenLine::plain("workspaces:    3"),
+                openbutler_protocol::ScreenLine::plain("clients:       1"),
+                openbutler_protocol::ScreenLine::plain("schedules:     4"),
+                openbutler_protocol::ScreenLine::plain("telegram:      polling (@helper_bot)"),
+                openbutler_protocol::ScreenLine::plain("entry:         dist/index.js"),
+                openbutler_protocol::ScreenLine::plain("build:         source"),
+            ],
         };
         success(request, serde_json::to_value(&status).unwrap())
     });
@@ -152,7 +162,16 @@ async fn sessions_renders_full_ids_models_and_the_running_marker() {
     ]);
     let responder: Responder = Arc::new(move |request| {
         assert_eq!(request.action, "session.list");
-        success(request, rows.clone())
+        success(
+            request,
+            json!({
+                "sessions": rows.clone(),
+                "lines": [
+                    { "tone": "plain", "text": "sess-alpha  2026-11-22T03:00:00Z  mock/demo [running]  Alpha chat" },
+                    { "tone": "plain", "text": "sess-beta  2026-11-21T22:00:00Z  openai/gpt-x  Beta chat" }
+                ]
+            }),
+        )
     });
     let _server = serve(&dir, responder);
 
@@ -169,7 +188,15 @@ async fn sessions_renders_full_ids_models_and_the_running_marker() {
 #[tokio::test]
 async fn an_empty_session_list_says_so() {
     let dir = unique_dir("sessions-empty");
-    let responder: Responder = Arc::new(|request| success(request, json!([])));
+    let responder: Responder = Arc::new(|request| {
+        success(
+            request,
+            json!({
+                "sessions": [],
+                "lines": [{ "tone": "plain", "text": "No sessions." }]
+            }),
+        )
+    });
     let _server = serve(&dir, responder);
 
     let text = execute(Command::Sessions { command: None }, &dir)
@@ -579,6 +606,12 @@ fn status_fixture(pid: u32) -> Value {
         unresponsive: None,
         entry: None,
         build_id: None,
+        lines: vec![
+            openbutler_protocol::ScreenLine::plain(format!("pid:           {pid}")),
+            openbutler_protocol::ScreenLine::plain("started:       2026-11-22T02:00:00Z"),
+            openbutler_protocol::ScreenLine::plain("workspaces:    1"),
+            openbutler_protocol::ScreenLine::plain("clients:       2"),
+        ],
     };
     serde_json::to_value(&status).unwrap()
 }
