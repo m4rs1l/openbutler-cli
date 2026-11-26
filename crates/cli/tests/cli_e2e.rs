@@ -102,6 +102,7 @@ async fn status_renders_the_host_report_line_by_line() {
     let responder: Responder = Arc::new(|request| {
         assert_eq!(request.action, "status");
         let status = DaemonStatus {
+            web: None,
             pid: 4242,
             started_at: "2026-11-22T01:02:03Z".to_owned(),
             workspace_count: 3,
@@ -605,6 +606,7 @@ fn status_fixture(pid: u32) -> Value {
         telegram: None,
         unresponsive: None,
         entry: None,
+        web: None,
         build_id: None,
         lines: vec![
             openbutler_protocol::ScreenLine::plain(format!("pid:           {pid}")),
