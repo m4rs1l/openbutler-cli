@@ -8,6 +8,7 @@ pub mod daemon;
 pub mod keys;
 pub mod ledger;
 pub mod logs;
+pub mod mcp;
 pub mod permissions;
 pub mod run;
 pub mod sessions;

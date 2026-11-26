@@ -2469,3 +2469,88 @@ fn sessions_prune_needs_the_window() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("--older-than"), "{stderr}");
 }
+
+#[tokio::test]
+async fn mcp_list_prints_the_hosts_screen() {
+    let dir = unique_dir("mcp-list");
+    let responder: Responder = Arc::new(|request| {
+        assert_eq!(request.action, "mcp.manage");
+        assert_eq!(
+            request
+                .payload
+                .get("command")
+                .and_then(serde_json::Value::as_str),
+            Some("list")
+        );
+        success(
+            request,
+            json!({
+                "servers": [],
+                "lines": [
+                    { "tone": "plain", "text": "\u{2500}\u{2500} MCP servers \u{2500}\u{2500}" },
+                    { "tone": "info", "text": "No MCP servers configured." }
+                ]
+            }),
+        )
+    });
+    let _server = serve(&dir, responder);
+
+    let text = execute(
+        Command::Mcp {
+            action: Some("list".to_owned()),
+        },
+        &dir,
+    )
+    .await
+    .unwrap();
+    let lines: Vec<&str> = text.lines().collect();
+    assert_eq!(lines.len(), 2, "{text:?}");
+    assert_eq!(lines[0], "\u{2500}\u{2500} MCP servers \u{2500}\u{2500}");
+    // An info line carries the palette's middle dot; the host's text follows.
+    assert_eq!(lines[1], "\u{b7} No MCP servers configured.");
+}
+
+#[tokio::test]
+async fn mcp_without_a_terminal_lists_and_says_so() {
+    let dir = unique_dir("mcp-notty");
+    let responder: Responder = Arc::new(|request| {
+        success(
+            request,
+            json!({
+                "servers": [],
+                "lines": [{ "tone": "info", "text": "No MCP servers configured." }]
+            }),
+        )
+    });
+    let _server = serve(&dir, responder);
+
+    // The test process has no terminal on stdin, so add degrades to the
+    // source's read-only path plus its hint.
+    let text = execute(
+        Command::Mcp {
+            action: Some("add".to_owned()),
+        },
+        &dir,
+    )
+    .await
+    .unwrap();
+    assert!(text.contains("No MCP servers configured."), "{text:?}");
+    assert!(
+        text.ends_with("Use an interactive terminal with openbutler mcp to add or remove servers."),
+        "{text:?}"
+    );
+}
+
+#[tokio::test]
+async fn mcp_refuses_an_unknown_subcommand() {
+    let dir = unique_dir("mcp-usage");
+    let error = execute(
+        Command::Mcp {
+            action: Some("frobnicate".to_owned()),
+        },
+        &dir,
+    )
+    .await
+    .expect_err("a refusal");
+    assert_eq!(error.to_string(), "Usage: openbutler mcp [list|add|remove]");
+}

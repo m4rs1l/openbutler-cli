@@ -353,7 +353,7 @@ pub fn confirm<T: Term + ?Sized>(term: &mut T, message: &str) -> Option<bool> {
 }
 
 /// A numbered menu (the source's `select`, rendered plain).
-fn select<T: Term>(term: &mut T, message: &str, choices: &[&str]) -> Option<usize> {
+pub(crate) fn select<T: Term>(term: &mut T, message: &str, choices: &[&str]) -> Option<usize> {
     loop {
         term.write(message);
         for (index, choice) in choices.iter().enumerate() {
@@ -369,7 +369,7 @@ fn select<T: Term>(term: &mut T, message: &str, choices: &[&str]) -> Option<usiz
 }
 
 /// One prompt line, trimmed of its newline.
-fn input<T: Term>(term: &mut T, message: &str) -> Option<String> {
+pub(crate) fn input<T: Term>(term: &mut T, message: &str) -> Option<String> {
     term.read_line(&format!("{message}: "))
 }
 

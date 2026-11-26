@@ -146,6 +146,11 @@ pub enum Command {
         #[arg(long, value_name = "PATH")]
         workspace: Option<String>,
     },
+    /// The global MCP server manager.
+    Mcp {
+        /// list | add | remove (bare: the interactive menu).
+        action: Option<String>,
+    },
     /// Manage provider API keys in the secret store.
     Keys {
         #[command(subcommand)]
@@ -283,6 +288,7 @@ pub async fn execute(command: Command, data_dir: &std::path::Path) -> Result<Str
         // buffered path the guard fires first, so a non-terminal caller
         // gets the refusal sentence and no prompts.
         Command::Setup => commands::setup::run(data_dir).await.map(|()| String::new()),
+        Command::Mcp { action } => commands::mcp::run(data_dir, action).await,
         Command::Config => commands::config::run(data_dir).await,
         Command::About => commands::about::run(data_dir).await,
         Command::Workspace {
@@ -413,6 +419,17 @@ pub fn main_entry() -> std::process::ExitCode {
             Command::Setup => commands::setup::run(&data_dir::data_dir())
                 .await
                 .map(|()| 0),
+            // The manager prompts on the real stdio itself.
+            Command::Mcp { action } => {
+                commands::mcp::run(&data_dir::data_dir(), action)
+                    .await
+                    .map(|text| {
+                        if !text.is_empty() {
+                            println!("{text}");
+                        }
+                        0
+                    })
+            }
             // The TUI draws on the real terminal itself.
             Command::Tui => crate::tui::run(&data_dir::data_dir()).await.map(|()| 0),
             other => {

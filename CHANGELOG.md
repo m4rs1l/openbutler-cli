@@ -13,6 +13,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   configured" sentence moved to the daemon; the CLI keeps only the prompts
   it needs to collect the answers.
 
+### Added
+
+
+- `openbutler mcp [list|add|remove]`: the host's list screen, the source's
+  interactive add/remove flows, and the "use an interactive terminal" line
+  when there is none. The payload field is `command` because the envelope
+  already owns `action` (a payload key of the same name fails to decode).
+
 ### Changed
 
 - `skills` prints the host table or its empty screen; the CLI no longer
