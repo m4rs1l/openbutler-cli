@@ -5,6 +5,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- `setup`'s Review block is the host's screen: the wizard asks
+  `settings.setup.review` for the set it collected and prints the answered
+  lines with its glyph palette. The body words and the "no provider
+  configured" sentence moved to the daemon; the CLI keeps only the prompts
+  it needs to collect the answers.
+
 ### Changed
 
 - `skills` prints the host table or its empty screen; the CLI no longer

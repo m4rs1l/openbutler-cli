@@ -25,7 +25,7 @@
 use std::io::{IsTerminal, Write};
 use std::path::Path;
 
-use openbutler_protocol::{DaemonRequest, DaemonResponse};
+use openbutler_protocol::{DaemonRequest, DaemonResponse, ScreenLine};
 use serde_json::{Value, json};
 
 use crate::CliError;
@@ -38,7 +38,10 @@ pub const TTY_REFUSAL: &str = "setup needs an interactive terminal. Run it from 
 pub async fn run(data_dir: &Path) -> Result<(), CliError> {
     require_terminal(std::io::stdin().is_terminal())?;
     let mut term = StdTerm;
-    match walk(&mut term, data_dir) {
+    let reviewer = DaemonReviewer {
+        data_dir: data_dir.to_path_buf(),
+    };
+    match walk(&mut term, data_dir, &reviewer).await? {
         Outcome::Discard => Ok(()),
         Outcome::Save(payload) => {
             let settings_file = save(data_dir, payload).await?;
@@ -84,6 +87,55 @@ pub async fn save(data_dir: &Path, payload: Value) -> Result<String, CliError> {
     }
 }
 
+/// What the wizard needs from the host: the Review screen's finished
+/// lines. The layout is the host's decision; the client only applies its
+/// glyph palette.
+pub trait Reviewer {
+    fn review(
+        &self,
+        payload: &Value,
+    ) -> impl std::future::Future<Output = Result<Vec<ScreenLine>, CliError>>;
+}
+
+/// The production reviewer: one `settings.setup.review` call, so the
+/// screen can never drift from the set the save would apply.
+pub struct DaemonReviewer {
+    /// The daemon's data directory, for the endpoint lookup.
+    pub data_dir: std::path::PathBuf,
+}
+
+impl Reviewer for DaemonReviewer {
+    async fn review(&self, payload: &Value) -> Result<Vec<ScreenLine>, CliError> {
+        let mut client = Client::connect(&self.data_dir).await?;
+        let mut request =
+            DaemonRequest::new(uuid::Uuid::new_v4().to_string(), "settings.setup.review");
+        if let Value::Object(fields) = payload {
+            for (key, value) in fields {
+                request.payload.insert(key.clone(), value.clone());
+            }
+        }
+        match client.call(&request).await? {
+            DaemonResponse::Success { result, .. } => {
+                let lines = result
+                    .get("lines")
+                    .and_then(Value::as_array)
+                    .cloned()
+                    .ok_or_else(|| {
+                        CliError::Answer(
+                            "the daemon answered settings.setup.review without lines".to_owned(),
+                        )
+                    })?;
+                serde_json::from_value(Value::Array(lines)).map_err(|error| {
+                    CliError::Answer(format!(
+                        "the daemon answered settings.setup.review with unreadable lines: {error}"
+                    ))
+                })
+            }
+            DaemonResponse::Failure { error, .. } => Err(CliError::Answer(error)),
+        }
+    }
+}
+
 /// What the walk decided: save these answers, or write nothing.
 enum Outcome {
     Save(Value),
@@ -100,11 +152,21 @@ struct Collected {
 /// Walks the wizard against any terminal implementation. `None` inside
 /// means EOF (Ctrl+D/pipe closed): cancel silently, the source's
 /// Ctrl+C behaviour — nothing was written, nothing is announced.
-fn walk<T: Term>(term: &mut T, data_dir: &Path) -> Outcome {
-    walk_inner(term, data_dir).unwrap_or(Outcome::Discard)
+async fn walk<T: Term, R: Reviewer>(
+    term: &mut T,
+    data_dir: &Path,
+    reviewer: &R,
+) -> Result<Outcome, CliError> {
+    Ok(walk_inner(term, data_dir, reviewer)
+        .await?
+        .unwrap_or(Outcome::Discard))
 }
 
-fn walk_inner<T: Term>(term: &mut T, data_dir: &Path) -> Option<Outcome> {
+async fn walk_inner<T: Term, R: Reviewer>(
+    term: &mut T,
+    data_dir: &Path,
+    reviewer: &R,
+) -> Result<Option<Outcome>, CliError> {
     term.write("");
     term.write(&crate::ui::section("Setup"));
     term.write(&crate::ui::kv(
@@ -131,19 +193,33 @@ fn walk_inner<T: Term>(term: &mut T, data_dir: &Path) -> Option<Outcome> {
         // The first pass must configure a provider (the source's machine
         // cannot leave the section otherwise); a later pass — `Back to
         // LLM providers` — only adds when asked.
-        if first_pass || confirm(term, "Add another LLM provider?")? {
-            collect_until_declined(term, &mut collected)?;
+        let add = if first_pass {
+            true
+        } else {
+            let Some(answer) = confirm(term, "Add another LLM provider?") else {
+                return Ok(None);
+            };
+            answer
+        };
+        if add {
+            let Some(()) = collect_until_declined(term, &mut collected) else {
+                return Ok(None);
+            };
             first_pass = false;
         }
 
         if !collected.is_empty() {
             let ids: Vec<&str> = collected.iter().map(|entry| entry.id.as_str()).collect();
-            let chosen = select(term, "Which provider should openbutler use?", &ids)?;
+            let Some(chosen) = select(term, "Which provider should openbutler use?", &ids) else {
+                return Ok(None);
+            };
             let provider = ids[chosen].to_owned();
             term.write(&format!(
                 "! No model in the catalog for {provider}; type the model id."
             ));
-            let raw = input(term, &format!("Model id for {provider}"))?;
+            let Some(raw) = input(term, &format!("Model id for {provider}")) else {
+                return Ok(None);
+            };
             // The source's catalog-empty branch: the first list item, and
             // an empty answer sets nothing (the pair never half-moves).
             if let Some(model) = parse_list(&raw).into_iter().next() {
@@ -152,28 +228,16 @@ fn walk_inner<T: Term>(term: &mut T, data_dir: &Path) -> Option<Outcome> {
             }
         }
 
-        term.write("");
-        term.write(&crate::ui::section("Review"));
-        if collected.is_empty() {
-            term.write("  \u{b7} no provider configured");
-        } else {
-            let default_id = default_pair.as_ref().map(|(id, _)| id.as_str());
-            for entry in &collected {
-                let is_default = default_id == Some(entry.id.as_str());
-                term.write(&format!(
-                    "  \u{b7} {}",
-                    summarize_provider(entry, is_default)
-                ));
-            }
+        // The Review block is the host's screen: the wizard asks which set
+        // the choices describe and prints the answered lines verbatim.
+        let review = reviewer
+            .review(&build_payload(&collected, default_pair.as_ref()))
+            .await?;
+        for line in &review {
+            term.write(&crate::ui::toned(line.tone, &line.text));
         }
-        term.write("");
-        let default_line = match &default_pair {
-            Some((provider, model)) => format!("{provider} / {model}"),
-            None => "(none)".to_owned(),
-        };
-        term.write(&crate::ui::kv("Default model", &default_line));
 
-        let decision = select(
+        let Some(decision) = select(
             term,
             "What next?",
             &[
@@ -181,16 +245,18 @@ fn walk_inner<T: Term>(term: &mut T, data_dir: &Path) -> Option<Outcome> {
                 "\u{2190} Back to LLM providers",
                 "Discard and exit without saving",
             ],
-        )?;
+        ) else {
+            return Ok(None);
+        };
         match decision {
             0 => {
                 let payload = build_payload(&collected, default_pair.as_ref());
-                return Some(Outcome::Save(payload));
+                return Ok(Some(Outcome::Save(payload)));
             }
             1 => continue,
             _ => {
                 term.write("! Nothing was written.");
-                return Some(Outcome::Discard);
+                return Ok(Some(Outcome::Discard));
             }
         }
     }
@@ -317,19 +383,6 @@ fn parse_list(raw: &str) -> Vec<String> {
         .collect()
 }
 
-/// The source's `summarizeProvider` line (setup.ts L26): `enabled` is
-/// always true in this flow (never collected) and `npm` is never
-/// collected, so those variants are unreachable here.
-fn summarize_provider(entry: &Collected, is_default: bool) -> String {
-    let keys = if entry.keys.len() == 1 {
-        "1 key".to_owned()
-    } else {
-        format!("{} keys", entry.keys.len())
-    };
-    let marker = if is_default { " *" } else { "" };
-    format!("on {}{} \u{2014} {keys}", entry.id, marker)
-}
-
 /// The last four characters (the source's `slice(-4)`; API keys are
 /// ASCII in practice, so character and UTF-16 slices agree).
 fn last_four(key: &str) -> String {
@@ -399,6 +452,7 @@ pub trait Term {
 mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+    use std::cell::RefCell;
     use std::collections::VecDeque;
 
     use super::*;
@@ -451,8 +505,31 @@ mod tests {
         }
     }
 
-    #[test]
-    fn wizard_collects_and_builds_the_payload() {
+    /// The host side of the Review block: canned lines (the daemon's own
+    /// pins cover the layout) and the payloads the wizard asked about.
+    struct FakeReviewer {
+        lines: Vec<ScreenLine>,
+        seen: RefCell<Vec<Value>>,
+    }
+
+    impl FakeReviewer {
+        fn new(lines: &[&str]) -> Self {
+            Self {
+                lines: lines.iter().map(|line| ScreenLine::plain(*line)).collect(),
+                seen: RefCell::new(Vec::new()),
+            }
+        }
+    }
+
+    impl Reviewer for FakeReviewer {
+        async fn review(&self, payload: &Value) -> Result<Vec<ScreenLine>, CliError> {
+            self.seen.borrow_mut().push(payload.clone());
+            Ok(self.lines.clone())
+        }
+    }
+
+    #[tokio::test]
+    async fn wizard_collects_builds_the_payload_and_prints_the_hosts_review() {
         let mut term = ScriptTerm::new(
             &[
                 Some("mock"),
@@ -465,7 +542,14 @@ mod tests {
             ],
             &[Some("sk-test-1234")],
         );
-        let payload = match walk(&mut term, Path::new("/ob/data")) {
+        let reviewer = FakeReviewer::new(&[
+            "  \u{b7} on mock * \u{2014} 1 key",
+            "  Default model          mock / mock/model-a",
+        ]);
+        let payload = match walk(&mut term, Path::new("/ob/data"), &reviewer)
+            .await
+            .unwrap()
+        {
             Outcome::Save(payload) => payload,
             Outcome::Discard => panic!("the happy path must save"),
         };
@@ -481,6 +565,12 @@ mod tests {
                 "defaultModel": "mock/model-a",
             })
         );
+        // The review question carries exactly the set the save would
+        // apply, so the host can never describe a different one.
+        assert_eq!(
+            reviewer.seen.borrow().as_slice(),
+            std::slice::from_ref(&payload)
+        );
 
         let settings_path = Path::new("/ob/data").join("settings.yaml");
         let out = &term.out;
@@ -492,12 +582,10 @@ mod tests {
             // has its own literal pin in `render_helpers_match_the_source_shapes`.
             format!(
                 "{}\n",
-                crate::ui::kv(
-                    "Settings file",
-                    &settings_path.display().to_string()
-                )
+                crate::ui::kv("Settings file", &settings_path.display().to_string())
             ),
-            "\u{b7} Settings are written at the last step. Ctrl+C cancels before saving.\n".to_owned(),
+            "\u{b7} Settings are written at the last step. Ctrl+C cancels before saving.\n"
+                .to_owned(),
             "! Catalog unavailable; only custom endpoints can be configured.\n".to_owned(),
             "Custom provider id (letters, digits, dashes): mock\n".to_owned(),
             "Endpoint base URL (required): http://127.0.0.1:9999/v1\n".to_owned(),
@@ -509,16 +597,21 @@ mod tests {
             "! No model in the catalog for mock; type the model id.\n".to_owned(),
             "Model id for mock: mock/model-a\n".to_owned(),
             "\u{2714} Default: mock / mock/model-a\n".to_owned(),
+            // Printed verbatim from the host's lines.
             "  \u{b7} on mock * \u{2014} 1 key\n".to_owned(),
             "  Default model          mock / mock/model-a\n".to_owned(),
-            "What next?\n1) Save these settings\n2) \u{2190} Back to LLM providers\n3) Discard and exit without saving\nChoice: 1\n".to_owned(),
+            "What next?\n1) Save these settings\n2) \u{2190} Back to LLM providers\n3) Discard and exit without saving\nChoice: 1\n"
+                .to_owned(),
         ] {
-            assert!(out.contains(&expected), "transcript is missing {expected:?}\n---\n{out}");
+            assert!(
+                out.contains(&expected),
+                "transcript is missing {expected:?}\n---\n{out}"
+            );
         }
     }
 
-    #[test]
-    fn invalid_answers_reprompt_with_the_source_sentences() {
+    #[tokio::test]
+    async fn invalid_answers_reprompt_with_the_source_sentences() {
         let mut term = ScriptTerm::new(
             &[
                 Some("bad id!"), // rejected → re-ask
@@ -533,7 +626,14 @@ mod tests {
             ],
             &[Some(""), Some("abcdef")],
         );
-        let payload = match walk(&mut term, Path::new("/ob/data")) {
+        let reviewer = FakeReviewer::new(&[
+            "  \u{b7} on ok-id \u{2014} 1 key",
+            "  Default model          (none)",
+        ]);
+        let payload = match walk(&mut term, Path::new("/ob/data"), &reviewer)
+            .await
+            .unwrap()
+        {
             Outcome::Save(payload) => payload,
             Outcome::Discard => panic!("validation recovers into a save"),
         };
@@ -566,8 +666,12 @@ mod tests {
         }
     }
 
-    #[test]
-    fn discard_announces_and_eof_cancels_silently() {
+    #[tokio::test]
+    async fn discard_announces_and_eof_cancels_silently() {
+        let reviewer = FakeReviewer::new(&[
+            "  \u{b7} on mock * \u{2014} 1 key",
+            "  Default model          mock / m",
+        ]);
         let mut discard = ScriptTerm::new(
             &[
                 Some("mock"),
@@ -582,7 +686,9 @@ mod tests {
             &[Some("k")],
         );
         assert!(matches!(
-            walk(&mut discard, Path::new("/ob/data")),
+            walk(&mut discard, Path::new("/ob/data"), &reviewer)
+                .await
+                .unwrap(),
             Outcome::Discard
         ));
         assert!(
@@ -593,7 +699,9 @@ mod tests {
 
         let mut eof = ScriptTerm::new(&[], &[]);
         assert!(matches!(
-            walk(&mut eof, Path::new("/ob/data")),
+            walk(&mut eof, Path::new("/ob/data"), &reviewer)
+                .await
+                .unwrap(),
             Outcome::Discard
         ));
         assert!(
@@ -614,19 +722,6 @@ mod tests {
             crate::ui::kv("Default model", "p / m"),
             "  Default model          p / m"
         );
-
-        let one = Collected {
-            id: "mock".to_owned(),
-            url: "http://h".to_owned(),
-            keys: vec!["k".to_owned()],
-        };
-        assert_eq!(summarize_provider(&one, true), "on mock * \u{2014} 1 key");
-        let three = Collected {
-            keys: vec!["a".to_owned(), "b".to_owned(), "c".to_owned()],
-            ..one
-        };
-        assert_eq!(summarize_provider(&three, false), "on mock \u{2014} 3 keys");
-
         assert_eq!(
             parse_list(" alpha,beta ;gamma\ndelta "),
             vec!["alpha", "beta", "gamma", "delta"]
