@@ -1744,3 +1744,56 @@ async fn prune_with_nothing_to_delete_says_so() {
         "\u{b7} No actions records are older than 12h; nothing to prune."
     );
 }
+
+// ---------------------------------------------------------------- about
+
+#[tokio::test]
+async fn about_renders_the_host_answer() {
+    let dir = unique_dir("about");
+    let responder: Responder = Arc::new(|request| {
+        assert_eq!(request.action, "about.report");
+        success(
+            request,
+            json!({
+                "version": "0.0.9",
+                "pid": 4242,
+                "shell": "pwsh.exe (powershell, PATH)",
+                "runtime": "windows/x86_64",
+                "settingsPath": "C:\\data\\settings.yaml",
+                "secretsPath": "C:\\data\\config.yaml",
+                "packages": "the bundled sidecar (AI SDK 7)",
+            }),
+        )
+    });
+    let _server = serve(&dir, responder);
+
+    let text = execute(Command::About, &dir).await.unwrap();
+    let lines: Vec<&str> = text.lines().collect();
+    assert_eq!(
+        lines[0], "",
+        "the screen opens with the section's blank line"
+    );
+    assert!(
+        lines[1].starts_with("\u{2500}\u{2500} OpenButler "),
+        "{:?}",
+        lines[1]
+    );
+    // The source's kv layout (key padded to 22, one space, value), with
+    // `Version` naming this CLI and `Host` naming the daemon that
+    // answered.
+    for (key, value) in [
+        ("Version", env!("CARGO_PKG_VERSION")),
+        ("Host", "0.0.9 (pid 4242)"),
+        ("Shell", "pwsh.exe (powershell, PATH)"),
+        ("Runtime", "windows/x86_64"),
+        ("Settings", "C:\\data\\settings.yaml"),
+        ("Secrets", "C:\\data\\config.yaml"),
+        ("Runtime packages", "the bundled sidecar (AI SDK 7)"),
+    ] {
+        let expected = format!("  {key:<22} {value}");
+        assert!(text.contains(&expected), "missing {expected:?} in {text}");
+    }
+    // The source's closing `ui.line()`: the rendered text ends with the
+    // blank line's newline.
+    assert!(text.ends_with('\n'), "the screen ends blank: {text:?}");
+}

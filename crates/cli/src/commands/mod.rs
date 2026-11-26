@@ -2,6 +2,7 @@
 //! out. Shared plumbing (dial, correlate, unwrap the success/failure union)
 //! lives in [`ask`].
 
+pub mod about;
 pub mod config;
 pub mod daemon;
 pub mod ledger;

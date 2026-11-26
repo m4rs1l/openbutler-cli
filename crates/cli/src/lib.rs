@@ -116,6 +116,8 @@ pub enum Command {
     Setup,
     /// The manager screen: providers, default model, readiness.
     Config,
+    /// Version, shell, runtime and the configuration paths.
+    About,
     /// The approval posture: mode, timeouts, review model.
     Permissions {
         /// workspace | auto-review | full-access (bare: show the current one).
@@ -222,6 +224,7 @@ pub async fn execute(command: Command, data_dir: &std::path::Path) -> Result<Str
         // gets the refusal sentence and no prompts.
         Command::Setup => commands::setup::run(data_dir).await.map(|()| String::new()),
         Command::Config => commands::config::run(data_dir).await,
+        Command::About => commands::about::run(data_dir).await,
         Command::Permissions {
             mode,
             review_timeout,

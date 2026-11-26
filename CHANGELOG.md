@@ -25,6 +25,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- `openbutler about` — version, shell, runtime and the configuration
+  paths from the daemon's `about.report` (the CLI prints the answer and
+  adds nothing but its own version).
+
 - `openbutler events` / `openbutler actions` — the durable ledgers: a bare call prints the daemon's rows as pretty JSON (the source's dump shape), `events retry <id>` sends `{eventId}`, and `prune --older-than <d> [--yes]` asks `ledger.prune` and lays out its counts (preview without `--yes`, the source's re-run hint; `No <kind> records…` when nothing is old enough). Pins: the pretty-JSON dump, the retry payload, both prune renders and their payloads, and the empty note. Verified live: empty ledgers, a preview, an invalid duration, stop.
 
 - `openbutler permissions [workspace|auto-review|full-access]
