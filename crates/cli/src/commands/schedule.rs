@@ -36,6 +36,19 @@ pub async fn run(data_dir: &Path, words: &[String]) -> Result<String, CliError> 
             .await?;
             Ok(screen(&result))
         }
+        "run" | "enable" | "disable" | "remove" => {
+            let Some(id) = words.get(1) else {
+                return Err(CliError::Answer(format!(
+                    "Usage: openbutler schedule {action} <id>"
+                )));
+            };
+            let result = call(
+                data_dir,
+                vec![("action", json!(action)), ("scheduleId", json!(id))],
+            )
+            .await?;
+            Ok(screen(&result))
+        }
         "capabilities" => {
             let result = call(data_dir, vec![("action", json!("capabilities"))]).await?;
             serde_json::to_string_pretty(&result).map_err(|source| CliError::Decode {
