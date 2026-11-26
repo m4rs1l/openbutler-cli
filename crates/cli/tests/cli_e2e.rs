@@ -1105,70 +1105,32 @@ async fn setup_save_posts_the_payload_and_names_the_file() {
 }
 
 #[tokio::test]
-async fn config_renders_the_report_the_daemon_computed() {
+async fn config_prints_the_hosts_screen() {
     let dir = unique_dir("config");
     let responder: Responder = Arc::new(|request| {
         assert_eq!(request.action, "config.report");
         success(
             request,
             json!({
-                "mcpServers": [],
-                "defaultWorkspace": null,
-                "toolAccess": "Workspace (default)",
-                "hasProviders": true,
-                "catalogLoaded": false,
-                "catalogLoading": true,
-                "providers": [
-                    {
-                        "id": "mock", "enabled": true, "keyCount": 1,
-                        "toolCapableCount": null, "isDefault": true, "custom": true,
-                        "url": "http://127.0.0.1:9/v1", "defaultModel": "test-model"
-                    }
-                ],
-                "default": { "providerId": "mock", "modelId": "test-model", "source": "settings" },
-                "reasoning": "default",
-                "showReasoning": true,
-                "readiness": { "ready": true, "problems": [], "hints": [] }
+                "lines": [
+                    { "tone": "plain", "text": "" },
+                    { "tone": "plain", "text": "\u{2500}\u{2500} MCP servers \u{2500}\u{2500}\u{2500}\u{2500}" },
+                    { "tone": "info", "text": "No MCP servers configured." },
+                    { "tone": "plain", "text": "  Tool access            Workspace (default)" },
+                    { "tone": "success", "text": "Ready to run." }
+                ]
             }),
         )
     });
     let _server = serve(&dir, responder);
 
     let text = execute(Command::Config, &dir).await.unwrap();
-    let lines: Vec<&str> = text.lines().map(str::trim_end).collect();
-    assert_eq!(
-        lines[0], "",
-        "the screen opens with the section's blank line"
-    );
-    assert!(
-        lines[1].starts_with("\u{2500}\u{2500} MCP servers "),
-        "{:?}",
-        lines[1]
-    );
-    assert!(text.contains("\u{b7} No MCP servers configured."), "{text}");
-    assert!(
-        text.contains("  Tool access            Workspace (default)"),
-        "{text}"
-    );
-    assert!(
-        text.contains("  mock *    on     1     unknown  test-model  custom"),
-        "the provider row is the daemon's row, laid out: {text}"
-    );
-    assert!(
-        text.contains("  Default                mock / test-model"),
-        "{text}"
-    );
-    assert!(
-        text.contains("The catalog is downloading in the background"),
-        "{text}"
-    );
-    assert!(text.contains("\u{2714} Ready to run."), "{text}");
-    assert!(
-        lines
-            .last()
-            .is_some_and(|line| line.starts_with("\u{b7} The catalog is downloading")),
-        "the download note closes the screen: {text}"
-    );
+    let lines: Vec<&str> = text.lines().collect();
+    assert_eq!(lines[0], "");
+    assert!(lines[1].starts_with("\u{2500}\u{2500} MCP servers "));
+    assert_eq!(lines[2], "\u{b7} No MCP servers configured.");
+    assert_eq!(lines[3], "  Tool access            Workspace (default)");
+    assert_eq!(lines[4], "\u{2714} Ready to run.");
 }
 
 #[tokio::test]
@@ -1839,20 +1801,20 @@ async fn prune_with_nothing_to_delete_says_so() {
 // ---------------------------------------------------------------- about
 
 #[tokio::test]
-async fn about_renders_the_host_answer() {
+async fn about_prints_the_hosts_screen() {
     let dir = unique_dir("about");
     let responder: Responder = Arc::new(|request| {
         assert_eq!(request.action, "about.report");
         success(
             request,
             json!({
-                "version": "0.0.9",
-                "pid": 4242,
-                "shell": "pwsh.exe (powershell, PATH)",
-                "runtime": "windows/x86_64",
-                "settingsPath": "C:\\data\\settings.yaml",
-                "secretsPath": "C:\\data\\config.yaml",
-                "packages": "the bundled sidecar (AI SDK 7)",
+                "lines": [
+                    { "tone": "plain", "text": "" },
+                    { "tone": "plain", "text": "\u{2500}\u{2500} OpenButler \u{2500}\u{2500}\u{2500}\u{2500}" },
+                    { "tone": "plain", "text": "  Version                0.0.9" },
+                    { "tone": "plain", "text": "  Host                   0.0.9 (pid 4242)" },
+                    { "tone": "plain", "text": "" }
+                ]
             }),
         )
     });
@@ -1864,28 +1826,10 @@ async fn about_renders_the_host_answer() {
         lines[0], "",
         "the screen opens with the section's blank line"
     );
-    assert!(
-        lines[1].starts_with("\u{2500}\u{2500} OpenButler "),
-        "{:?}",
-        lines[1]
-    );
-    // The source's kv layout (key padded to 22, one space, value), with
-    // `Version` naming this CLI and `Host` naming the daemon that
-    // answered.
-    for (key, value) in [
-        ("Version", env!("CARGO_PKG_VERSION")),
-        ("Host", "0.0.9 (pid 4242)"),
-        ("Shell", "pwsh.exe (powershell, PATH)"),
-        ("Runtime", "windows/x86_64"),
-        ("Settings", "C:\\data\\settings.yaml"),
-        ("Secrets", "C:\\data\\config.yaml"),
-        ("Runtime packages", "the bundled sidecar (AI SDK 7)"),
-    ] {
-        let expected = format!("  {key:<22} {value}");
-        assert!(text.contains(&expected), "missing {expected:?} in {text}");
-    }
-    // The source's closing `ui.line()`: the rendered text ends with the
-    // blank line's newline.
+    assert!(lines[1].starts_with("\u{2500}\u{2500} OpenButler "));
+    assert_eq!(lines[2], "  Version                0.0.9");
+    assert_eq!(lines[3], "  Host                   0.0.9 (pid 4242)");
+    // The host's closing blank line: the rendered text ends with its newline.
     assert!(text.ends_with('\n'), "the screen ends blank: {text:?}");
 }
 

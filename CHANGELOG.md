@@ -7,6 +7,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- `about` and `config` print the host's finished lines; the CLI no longer
+  lays out either screen (the config layout — sections, provider table,
+  readiness block — left this crate for the host).
 - `openbutler logs` and `openbutler permissions` no longer decide anything:
   the host reads the log file (`logs.tail`, absolute path, local-only) and
   composes the permissions screen (`lines` with tones). The client applies
