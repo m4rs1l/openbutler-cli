@@ -40,6 +40,18 @@ pub fn failure(text: &str) -> String {
     format!("\u{2716} {text}")
 }
 
+/// A line the host composed, with the tone it chose. The host decides which
+/// sentence is said and how it reads; this palette is the client's — the
+/// same split `usage.report` makes with finished lines.
+pub fn toned(tone: &str, text: &str) -> String {
+    match tone {
+        "info" => info(text),
+        "success" => success(text),
+        "warn" => warn(text),
+        _ => text.to_owned(),
+    }
+}
+
 /// `ui.table` (ui.ts L42-61): header, a rule of column widths, then rows —
 /// two spaces between columns, columns sized to their widest cell. An empty
 /// row set prints the source's `(nothing to show)` line.

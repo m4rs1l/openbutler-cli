@@ -25,6 +25,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- `openbutler sessions prune --older-than D [--yes]` — session retention
+  through the host: the preview lists each record with its UTC date, id
+  and size plus the source's preview sentence; `--yes` deletes and prints
+  `Deleted N session file(s) (…).` with a `N file(s) could not be
+  deleted.` tail. Every line arrives with the host's tone and this module
+  only applies its glyph palette (`ui::toned`). `--older-than` is
+  required by the parser (exit 2), and the daemon's duration refusal
+  surfaces verbatim.
 - `openbutler keys [add <provider>|list|remove <provider>]` — the provider
   key store through the daemon: the table with display tails, the two-line
   empty screen, masked key collection (the setup wizard's prompts, one

@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 use openbutler_cli::{
-    ActionsCommand, CliError, Command, DaemonCommand, EventsCommand, TokenCommand,
+    ActionsCommand, CliError, Command, DaemonCommand, EventsCommand, SessionsCommand, TokenCommand,
     WorkspaceCommand, execute,
 };
 use openbutler_protocol::status::TelegramState;
@@ -156,7 +156,9 @@ async fn sessions_renders_full_ids_models_and_the_running_marker() {
     });
     let _server = serve(&dir, responder);
 
-    let text = execute(Command::Sessions, &dir).await.unwrap();
+    let text = execute(Command::Sessions { command: None }, &dir)
+        .await
+        .unwrap();
     assert_eq!(
         text,
         "sess-alpha  2026-11-22T03:00:00Z  mock/demo [running]  Alpha chat\n\
@@ -170,7 +172,9 @@ async fn an_empty_session_list_says_so() {
     let responder: Responder = Arc::new(|request| success(request, json!([])));
     let _server = serve(&dir, responder);
 
-    let text = execute(Command::Sessions, &dir).await.unwrap();
+    let text = execute(Command::Sessions { command: None }, &dir)
+        .await
+        .unwrap();
     assert_eq!(text, "No sessions.");
 }
 
@@ -185,7 +189,9 @@ async fn a_daemon_failure_surfaces_its_sentence_verbatim() {
     });
     let _server = serve(&dir, responder);
 
-    let error = execute(Command::Sessions, &dir).await.unwrap_err();
+    let error = execute(Command::Sessions { command: None }, &dir)
+        .await
+        .unwrap_err();
     assert!(matches!(error, CliError::Answer(_)));
     assert_eq!(error.to_string(), "This subagent session is view-only.");
 }
@@ -201,7 +207,9 @@ async fn a_response_for_another_request_is_refused() {
     });
     let _server = serve(&dir, responder);
 
-    let error = execute(Command::Sessions, &dir).await.unwrap_err();
+    let error = execute(Command::Sessions { command: None }, &dir)
+        .await
+        .unwrap_err();
     assert!(matches!(error, CliError::Client(_)));
     assert!(error.to_string().contains("different request id"));
 }
@@ -2202,4 +2210,155 @@ fn keys_add_refuses_without_a_terminal() {
         stderr.contains("openbutler keys add needs an interactive terminal."),
         "{stderr}"
     );
+}
+
+#[tokio::test]
+async fn sessions_prune_previews_the_host_lines() {
+    let dir = unique_dir("sessions-prune-preview");
+    let seen = Arc::new(std::sync::Mutex::new(None));
+    let responder: Responder = {
+        let seen = seen.clone();
+        Arc::new(
+            move |request: &DaemonRequest| match request.action.as_str() {
+                "sessions.prune" => {
+                    *seen.lock().unwrap() = Some(Value::Object(request.payload.clone()));
+                    success(
+                        request,
+                        json!({
+                            "count": 1,
+                            "totalBytes": 1024,
+                            "lines": [
+                                { "tone": "plain", "text": "  2020-01-02  11111111-1111-4111-8111-111111111111  1.0 KB" },
+                                { "tone": "info", "text": "1 session file(s), 1.0 KB total. Nothing was deleted; re-run with --yes to delete them." }
+                            ]
+                        }),
+                    )
+                }
+                other => panic!("unexpected action {other}"),
+            },
+        )
+    };
+    let _server = serve(&dir, responder);
+
+    let preview = execute(
+        Command::Sessions {
+            command: Some(SessionsCommand::Prune {
+                older_than: "30d".to_owned(),
+                yes: false,
+            }),
+        },
+        &dir,
+    )
+    .await
+    .unwrap();
+    let lines: Vec<&str> = preview.lines().collect();
+    assert_eq!(
+        lines[0],
+        "  2020-01-02  11111111-1111-4111-8111-111111111111  1.0 KB"
+    );
+    assert_eq!(
+        lines[1],
+        "\u{b7} 1 session file(s), 1.0 KB total. Nothing was deleted; re-run with --yes to delete them."
+    );
+    assert_eq!(
+        seen.lock().unwrap().clone(),
+        Some(json!({ "olderThan": "30d", "apply": false }))
+    );
+}
+
+#[tokio::test]
+async fn sessions_prune_applies_with_the_success_line() {
+    let dir = unique_dir("sessions-prune-apply");
+    let seen = Arc::new(std::sync::Mutex::new(None));
+    let responder: Responder = {
+        let seen = seen.clone();
+        Arc::new(
+            move |request: &DaemonRequest| match request.action.as_str() {
+                "sessions.prune" => {
+                    *seen.lock().unwrap() = Some(Value::Object(request.payload.clone()));
+                    success(
+                        request,
+                        json!({
+                            "count": 1,
+                            "totalBytes": 1024,
+                            "deleted": 1,
+                            "failed": 0,
+                            "lines": [
+                                { "tone": "plain", "text": "  2020-01-02  11111111-1111-4111-8111-111111111111  1.0 KB" },
+                                { "tone": "success", "text": "Deleted 1 session file(s) (1.0 KB)." }
+                            ]
+                        }),
+                    )
+                }
+                other => panic!("unexpected action {other}"),
+            },
+        )
+    };
+    let _server = serve(&dir, responder);
+
+    let output = execute(
+        Command::Sessions {
+            command: Some(SessionsCommand::Prune {
+                older_than: "30d".to_owned(),
+                yes: true,
+            }),
+        },
+        &dir,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        output.lines().last().unwrap(),
+        "\u{2714} Deleted 1 session file(s) (1.0 KB)."
+    );
+    assert_eq!(
+        seen.lock().unwrap().clone(),
+        Some(json!({ "olderThan": "30d", "apply": true }))
+    );
+}
+
+#[tokio::test]
+async fn sessions_prune_keeps_the_duration_refusal_verbatim() {
+    let dir = unique_dir("sessions-prune-refusal");
+    let responder: Responder = Arc::new(|request: &DaemonRequest| match request.action.as_str() {
+        "sessions.prune" => DaemonResponse::Failure {
+            version: DAEMON_PROTOCOL_VERSION,
+            id: request.id.clone(),
+            ok: false,
+            error: "Invalid duration \"3x\". Use a value like 30d, 12h, 90m, or 2w.".to_owned(),
+        },
+        other => panic!("unexpected action {other}"),
+    });
+    let _server = serve(&dir, responder);
+
+    let error = execute(
+        Command::Sessions {
+            command: Some(SessionsCommand::Prune {
+                older_than: "3x".to_owned(),
+                yes: false,
+            }),
+        },
+        &dir,
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "Invalid duration \"3x\". Use a value like 30d, 12h, 90m, or 2w."
+    );
+}
+
+#[test]
+fn sessions_prune_needs_the_window() {
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_openbutler"))
+        .args(["sessions", "prune"])
+        .output()
+        .expect("spawn the binary");
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "a usage error is exit class 2"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("--older-than"), "{stderr}");
 }

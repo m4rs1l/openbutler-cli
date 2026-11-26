@@ -46,6 +46,20 @@ pub enum EventsCommand {
     },
 }
 
+/// `openbutler sessions` subcommands (cli-main.ts L1465).
+#[derive(Debug, Clone, clap::Subcommand)]
+pub enum SessionsCommand {
+    /// Delete saved sessions older than a window (preview without `--yes`).
+    Prune {
+        /// A window like 30d, 12h, 90m, or 2w.
+        #[arg(long, value_name = "DURATION")]
+        older_than: String,
+        /// Actually delete (preview otherwise).
+        #[arg(long)]
+        yes: bool,
+    },
+}
+
 /// `openbutler actions` subcommands.
 #[derive(Debug, Clone, clap::Subcommand)]
 pub enum ActionsCommand {
@@ -65,8 +79,11 @@ pub enum ActionsCommand {
 pub enum Command {
     /// Daemon and workspace status as the host reports it.
     Status,
-    /// List saved sessions across workspaces.
-    Sessions,
+    /// List saved sessions, or prune the ones older than a window.
+    Sessions {
+        #[command(subcommand)]
+        command: Option<SessionsCommand>,
+    },
     /// One-shot request: run it, print the answer, exit.
     Run {
         /// The request text for the agent.
@@ -237,7 +254,7 @@ pub enum TokenCommand {
 pub async fn execute(command: Command, data_dir: &std::path::Path) -> Result<String, CliError> {
     match command {
         Command::Status => commands::status::run(data_dir).await,
-        Command::Sessions => commands::sessions::run(data_dir).await,
+        Command::Sessions { command } => commands::sessions::run(data_dir, command).await,
         Command::Events { command } => commands::ledger::events(data_dir, command).await,
         Command::Actions { command } => commands::ledger::actions(data_dir, command).await,
         Command::Daemon { command } => match command.unwrap_or(DaemonCommand::Status) {
