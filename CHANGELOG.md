@@ -17,6 +17,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   rendered lines), and the command forwards the flags, prints the lines,
   and — with `--json` — the host's `{label, summary, days}` envelope
   unchanged. The CLI's `rusqlite` dependency went with the query.
+- Protocol rev bumped to `2a4a4af` (`SessionRecordWindow`): the windowed
+  `session.load` contract (tail window + `entriesFrom`/`totalEntries`,
+  older pages through `session.entries-range`) closes the 32 MiB
+  transcript gap on the daemon side, so the surface doc's gap list is
+  empty.
 
 ### Added
 
