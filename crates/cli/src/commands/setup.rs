@@ -250,7 +250,7 @@ fn ask_url<T: Term>(term: &mut T) -> Option<String> {
 /// Collects the complete key list for one provider (setup.ts L81): the
 /// prompts name the provider, an empty first answer refuses, and the
 /// stored line shows only the last four characters.
-fn ask_keys<T: Term>(term: &mut T, owner: &str) -> Option<Vec<String>> {
+pub fn ask_keys<T: Term + ?Sized>(term: &mut T, owner: &str) -> Option<Vec<String>> {
     let mut keys: Vec<String> = Vec::new();
     loop {
         let prompt = if keys.is_empty() {
@@ -280,7 +280,7 @@ fn ask_keys<T: Term>(term: &mut T, owner: &str) -> Option<Vec<String>> {
 }
 
 /// A yes/no line; the source's `confirm` default is false.
-fn confirm<T: Term>(term: &mut T, message: &str) -> Option<bool> {
+pub fn confirm<T: Term + ?Sized>(term: &mut T, message: &str) -> Option<bool> {
     let answer = term.read_line(&format!("{message} [y/N]: "))?;
     let answer = answer.trim();
     Some(answer.eq_ignore_ascii_case("y") || answer.eq_ignore_ascii_case("yes"))
@@ -365,7 +365,7 @@ fn build_payload(collected: &[Collected], default_pair: Option<&(String, String)
 
 /// The wizard's terminal: writes go straight to stdout, prompts are
 /// flushed before the read.
-struct StdTerm;
+pub struct StdTerm;
 
 impl Term for StdTerm {
     fn write(&mut self, text: &str) {
@@ -389,7 +389,7 @@ impl Term for StdTerm {
 
 /// What the wizard needs from a terminal. The real one is `StdTerm`;
 /// tests script the answers and capture the transcript.
-trait Term {
+pub trait Term {
     fn write(&mut self, text: &str);
     fn read_line(&mut self, prompt: &str) -> Option<String>;
     fn read_password(&mut self, prompt: &str) -> Option<String>;

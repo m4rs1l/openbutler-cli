@@ -5,6 +5,7 @@
 pub mod about;
 pub mod config;
 pub mod daemon;
+pub mod keys;
 pub mod ledger;
 pub mod logs;
 pub mod permissions;

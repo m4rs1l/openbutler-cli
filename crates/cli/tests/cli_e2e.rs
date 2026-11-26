@@ -1939,3 +1939,267 @@ async fn skills_without_a_skill_names_the_roots() {
         "\u{b7} Add a skill-name/SKILL.md with Agent Skills frontmatter."
     );
 }
+
+// ------------------------------------------------------------------- keys
+
+/// A scripted terminal: queued answers (None = EOF), captured transcript.
+struct ScriptTerm {
+    answers: std::collections::VecDeque<Option<String>>,
+    transcript: Vec<String>,
+}
+
+impl ScriptTerm {
+    fn new(answers: Vec<Option<&str>>) -> Self {
+        Self {
+            answers: answers
+                .into_iter()
+                .map(|answer| answer.map(str::to_owned))
+                .collect(),
+            transcript: Vec::new(),
+        }
+    }
+}
+
+impl openbutler_cli::commands::setup::Term for ScriptTerm {
+    fn write(&mut self, text: &str) {
+        self.transcript.push(text.to_owned());
+    }
+
+    fn read_line(&mut self, prompt: &str) -> Option<String> {
+        self.transcript.push(prompt.to_owned());
+        self.answers.pop_front().flatten()
+    }
+
+    fn read_password(&mut self, prompt: &str) -> Option<String> {
+        self.transcript.push(prompt.to_owned());
+        self.answers.pop_front().flatten()
+    }
+}
+
+#[tokio::test]
+async fn keys_list_renders_the_table() {
+    let dir = unique_dir("keys-list");
+    let responder: Responder = Arc::new(|request| {
+        assert_eq!(request.action, "keys.list");
+        success(
+            request,
+            json!({
+                "providers": [
+                    { "id": "mock", "enabled": true, "keyCount": 2, "tails": ["…ne", "…wo"] },
+                    { "id": "off", "enabled": false, "keyCount": 0, "tails": [] }
+                ]
+            }),
+        )
+    });
+    let _server = serve(&dir, responder);
+
+    let text = execute(Command::Keys { command: None }, &dir)
+        .await
+        .unwrap();
+    let lines: Vec<&str> = text.lines().collect();
+    assert!(lines[0].starts_with("  PROVIDER"), "{:?}", lines[0]);
+    assert!(lines[0].contains("ENDING"));
+    assert!(lines[2].contains("mock") && lines[2].contains("…ne …wo"));
+    assert!(lines[3].contains("off") && lines[3].contains("off"));
+}
+
+#[tokio::test]
+async fn keys_list_without_providers_says_so() {
+    let dir = unique_dir("keys-empty");
+    let responder: Responder = Arc::new(|request| success(request, json!({ "providers": [] })));
+    let _server = serve(&dir, responder);
+
+    let text = execute(Command::Keys { command: None }, &dir)
+        .await
+        .unwrap();
+    assert_eq!(
+        text,
+        "\u{b7} No provider is configured.\n\
+         \u{b7} Add one with: openbutler keys add <provider>"
+    );
+}
+
+#[tokio::test]
+async fn keys_add_collects_masked_keys_and_names_the_save() {
+    let dir = unique_dir("keys-add");
+    let responder: Responder = Arc::new(|request| {
+        assert_eq!(request.action, "keys.add");
+        assert_eq!(request.payload["provider"], "mock");
+        assert_eq!(request.payload["keys"], json!(["sk-one"]));
+        success(request, json!({ "provider": "mock", "added": 1 }))
+    });
+    let _server = serve(&dir, responder);
+
+    let mut term = ScriptTerm::new(vec![Some("sk-one"), Some("n")]);
+    let text = openbutler_cli::commands::keys::run_with(
+        &mut term,
+        &dir,
+        openbutler_cli::commands::keys::KeysRequest::Add {
+            provider: "mock".to_owned(),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(text, "\u{2714} mock: 1 key saved to the secret store.");
+    assert!(
+        term.transcript
+            .iter()
+            .any(|line| line.contains("Paste the API key for mock")),
+        "{:?}",
+        term.transcript
+    );
+    // Only the tail ever appears in the transcript.
+    assert!(
+        term.transcript.iter().any(|line| line.contains("…-one")),
+        "{:?}",
+        term.transcript
+    );
+    assert!(
+        !term.transcript.iter().any(|line| line.contains("sk-one")),
+        "{:?}",
+        term.transcript
+    );
+}
+
+#[tokio::test]
+async fn keys_add_with_nothing_typed_says_nothing_added() {
+    let dir = unique_dir("keys-add-empty");
+    // No daemon: nothing is typed, so nothing is sent.
+    let mut term = ScriptTerm::new(vec![Some(""), None]);
+    let text = openbutler_cli::commands::keys::run_with(
+        &mut term,
+        &dir,
+        openbutler_cli::commands::keys::KeysRequest::Add {
+            provider: "mock".to_owned(),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(text, "\u{b7} Nothing added.");
+    assert!(
+        term.transcript
+            .iter()
+            .any(|line| line.contains("mock needs at least one API key.")),
+        "{:?}",
+        term.transcript
+    );
+}
+
+#[tokio::test]
+async fn keys_remove_confirms_then_removes() {
+    let dir = unique_dir("keys-remove");
+    let responder: Responder = Arc::new(|request| match request.action.as_str() {
+        "keys.list" => success(
+            request,
+            json!({ "providers": [{ "id": "mock", "enabled": true, "keyCount": 2, "tails": [] }] }),
+        ),
+        "keys.remove" => {
+            assert_eq!(request.payload["provider"], "mock");
+            success(request, json!({ "provider": "mock", "removed": 2 }))
+        }
+        other => panic!("unexpected action {other}"),
+    });
+    let _server = serve(&dir, responder);
+
+    let mut term = ScriptTerm::new(vec![Some("y")]);
+    let text = openbutler_cli::commands::keys::run_with(
+        &mut term,
+        &dir,
+        openbutler_cli::commands::keys::KeysRequest::Remove {
+            provider: "mock".to_owned(),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        text,
+        "\u{2714} mock: keys removed. The provider entry itself stays."
+    );
+    assert!(
+        term.transcript
+            .iter()
+            .any(|line| line.contains("Remove 2 keys for mock?")),
+        "{:?}",
+        term.transcript
+    );
+}
+
+#[tokio::test]
+async fn keys_remove_declined_writes_nothing() {
+    let dir = unique_dir("keys-remove-no");
+    let remove_called = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let flag = remove_called.clone();
+    let responder: Responder = Arc::new(move |request| match request.action.as_str() {
+        "keys.list" => success(
+            request,
+            json!({ "providers": [{ "id": "mock", "enabled": true, "keyCount": 1, "tails": [] }] }),
+        ),
+        other => {
+            flag.store(true, Ordering::SeqCst);
+            panic!("unexpected action {other}");
+        }
+    });
+    let _server = serve(&dir, responder);
+
+    let mut term = ScriptTerm::new(vec![Some("n")]);
+    let text = openbutler_cli::commands::keys::run_with(
+        &mut term,
+        &dir,
+        openbutler_cli::commands::keys::KeysRequest::Remove {
+            provider: "mock".to_owned(),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(text, "\u{b7} Cancelled. Nothing was written.");
+    assert!(!remove_called.load(Ordering::SeqCst));
+}
+
+#[tokio::test]
+async fn keys_remove_unknown_provider_surfaces_the_daemon_sentence() {
+    let dir = unique_dir("keys-remove-unknown");
+    let responder: Responder = Arc::new(|request| match request.action.as_str() {
+        "keys.list" => success(request, json!({ "providers": [] })),
+        "keys.remove" => DaemonResponse::Failure {
+            version: DAEMON_PROTOCOL_VERSION,
+            id: request.id.clone(),
+            ok: false,
+            error: "Unknown provider \"nope\". Configure it first with openbutler setup."
+                .to_owned(),
+        },
+        other => panic!("unexpected action {other}"),
+    });
+    let _server = serve(&dir, responder);
+
+    let mut term = ScriptTerm::new(vec![]);
+    let error = openbutler_cli::commands::keys::run_with(
+        &mut term,
+        &dir,
+        openbutler_cli::commands::keys::KeysRequest::Remove {
+            provider: "nope".to_owned(),
+        },
+    )
+    .await
+    .expect_err("a refusal is an error");
+    let CliError::Answer(sentence) = error else {
+        panic!("expected the daemon's own sentence");
+    };
+    assert!(sentence.starts_with("Unknown provider \"nope\"."));
+}
+
+#[test]
+fn keys_add_refuses_without_a_terminal() {
+    let dir = unique_dir("keys-guard");
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_openbutler"))
+        .args(["keys", "add", "mock"])
+        .env("OPENBUTLER_DATA_DIR", &dir)
+        .stdin(std::process::Stdio::piped())
+        .output()
+        .expect("spawn the binary");
+    assert_eq!(output.status.code(), Some(1), "a refusal is exit class 1");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("openbutler keys add needs an interactive terminal."),
+        "{stderr}"
+    );
+}

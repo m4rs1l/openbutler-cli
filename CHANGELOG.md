@@ -25,6 +25,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- `openbutler keys [add <provider>|list|remove <provider>]` — the provider
+  key store through the daemon: the table with display tails, the two-line
+  empty screen, masked key collection (the setup wizard's prompts, one
+  authority) and a confirmed remove. Both write actions refuse without a
+  terminal.
 - `openbutler skills [--workspace PATH]` — the Agent Skill table (or the
   source's empty screen naming every scanned root) from the daemon's
   `skills.list`; discovery and frontmatter rules live in the host.

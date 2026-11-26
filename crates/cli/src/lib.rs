@@ -129,6 +129,11 @@ pub enum Command {
         #[arg(long, value_name = "PATH")]
         workspace: Option<String>,
     },
+    /// Manage provider API keys in the secret store.
+    Keys {
+        #[command(subcommand)]
+        command: Option<KeysCommand>,
+    },
     /// The approval posture: mode, timeouts, review model.
     Permissions {
         /// workspace | auto-review | full-access (bare: show the current one).
@@ -149,6 +154,23 @@ pub enum Command {
 
 /// `openbutler daemon` subcommands; bare `daemon` means `status`, the
 /// source's default.
+/// `openbutler keys` subcommands; bare `keys` means `list`.
+#[derive(Debug, Clone, clap::Subcommand)]
+pub enum KeysCommand {
+    /// Add keys for a provider (masked prompts; needs a terminal).
+    Add {
+        /// The provider id.
+        provider: String,
+    },
+    /// List providers and their stored key counts.
+    List,
+    /// Remove every key of a provider (confirmed; needs a terminal).
+    Remove {
+        /// The provider id.
+        provider: String,
+    },
+}
+
 /// `openbutler workspace` subcommands.
 #[derive(Debug, Clone, clap::Subcommand)]
 pub enum WorkspaceCommand {
@@ -250,6 +272,18 @@ pub async fn execute(command: Command, data_dir: &std::path::Path) -> Result<Str
             command: WorkspaceCommand::Default { path },
         } => commands::workspace::run(data_dir, path).await,
         Command::Skills { workspace } => commands::skills::run(data_dir, workspace).await,
+        Command::Keys { command } => {
+            let request = match command {
+                None | Some(KeysCommand::List) => commands::keys::KeysRequest::List,
+                Some(KeysCommand::Add { provider }) => {
+                    commands::keys::KeysRequest::Add { provider }
+                }
+                Some(KeysCommand::Remove { provider }) => {
+                    commands::keys::KeysRequest::Remove { provider }
+                }
+            };
+            commands::keys::run(data_dir, request).await
+        }
         Command::Permissions {
             mode,
             review_timeout,
