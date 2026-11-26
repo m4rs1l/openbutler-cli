@@ -36,6 +36,23 @@ pub async fn run(data_dir: &Path, words: &[String]) -> Result<String, CliError> 
             .await?;
             Ok(screen(&result))
         }
+        "add" | "update" => {
+            let Some(path) = words.get(1) else {
+                return Err(CliError::Answer(format!(
+                    "Usage: openbutler schedule {action} <schedule.json>"
+                )));
+            };
+            let text = std::fs::read_to_string(path)
+                .map_err(|error| CliError::Answer(format!("{path}: {error}")))?;
+            let schedule: Value = serde_json::from_str(&text)
+                .map_err(|error| CliError::Answer(format!("{path}: {error}")))?;
+            let result = call(
+                data_dir,
+                vec![("input", json!({ "action": action, "schedule": schedule }))],
+            )
+            .await?;
+            Ok(screen(&result))
+        }
         "run" | "enable" | "disable" | "remove" => {
             let Some(id) = words.get(1) else {
                 return Err(CliError::Answer(format!(
