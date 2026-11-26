@@ -1,7 +1,9 @@
 # Changelog
 
-Notable changes to this workspace are recorded here.
-Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
@@ -15,54 +17,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   lines with its glyph palette. The body words and the "no provider
   configured" sentence moved to the daemon; the CLI keeps only the prompts
   it needs to collect the answers.
-
-### Added
-
-
 - `openbutler mcp [list|add|remove]`: the host's list screen, the source's
   interactive add/remove flows, and the "use an interactive terminal" line
   when there is none. The payload field is `command` because the envelope
   already owns `action` (a payload key of the same name fails to decode).
-
-### Added
-
-
 - `openbutler logs --level --event --json`: the filters travel to the host
   (`logs.tail`), which selects and formats the records.
-
-### Changed
-
-- `skills` prints the host table or its empty screen; the CLI no longer
-  lays it out.
-- `status` and `sessions` print the host's screens (`DaemonStatus.lines`,
-  `SessionListAnswer.lines`); a host that predates the screen says so
-  instead of printing nothing. The protocol's `ScreenLine`/`Tone` is the
-  one line shape, and `ui::screen` is the one glyph palette.
-- `about` and `config` print the host's finished lines; the CLI no longer
-  lays out either screen (the config layout — sections, provider table,
-  readiness block — left this crate for the host).
-- `openbutler logs` and `openbutler permissions` no longer decide anything:
-  the host reads the log file (`logs.tail`, absolute path, local-only) and
-  composes the permissions screen (`lines` with tones). The client applies
-  its glyph palette (`ui::screen`) and prints.
-- The installed binary is `openbutler` (`[[bin]] name` — the package
-  keeps the repo name), and the default data directory mirrors the
-  daemon's `openbutler-daemon` rule: the CLI and the host resolve the
-  same directory, and neither touches the legacy Node install's
-  `openbutler` data.
-- `openbutler usage` no longer reads `state.db`: the numbers live in the
-  daemon's `usage.report` (the label, the summary, the day buckets and the
-  rendered lines), and the command forwards the flags, prints the lines,
-  and — with `--json` — the host's `{label, summary, days}` envelope
-  unchanged. The CLI's `rusqlite` dependency went with the query.
-- Protocol rev bumped to `2a4a4af` (`SessionRecordWindow`): the windowed
-  `session.load` contract (tail window + `entriesFrom`/`totalEntries`,
-  older pages through `session.entries-range`) closes the 32 MiB
-  transcript gap on the daemon side, so the surface doc's gap list is
-  empty.
-
-### Added
-
 - `openbutler sessions prune --older-than D [--yes]` — session retention
   through the host: the preview lists each record with its UTC date, id
   and size plus the source's preview sentence; `--yes` deletes and prints
@@ -86,9 +46,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `openbutler about` — version, shell, runtime and the configuration
   paths from the daemon's `about.report` (the CLI prints the answer and
   adds nothing but its own version).
-
 - `openbutler events` / `openbutler actions` — the durable ledgers: a bare call prints the daemon's rows as pretty JSON (the source's dump shape), `events retry <id>` sends `{eventId}`, and `prune --older-than <d> [--yes]` asks `ledger.prune` and lays out its counts (preview without `--yes`, the source's re-run hint; `No <kind> records…` when nothing is old enough). Pins: the pretty-JSON dump, the retry payload, both prune renders and their payloads, and the empty note. Verified live: empty ledgers, a preview, an invalid duration, stop.
-
 - `openbutler permissions [workspace|auto-review|full-access]
   [--review-timeout N] [--approval-timeout N] [--review-model P/M|none]` —
   one `permissions.manage` call carries every provided flag; the screen is
@@ -99,7 +57,6 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   payload (`{mode, reviewTimeoutSeconds, approvalTimeoutSeconds,
   reviewModel}`) with its success lines, and the refusal pass-through.
   Verified live: bare, set, invalid-value refusal, stop.
-
 - `openbutler daemon token [create|list|revoke <id>]` — remote auth tokens
   (bare `token` lists). The source's four `create` lines, one `kv` row per
   token for `list` (or the source's empty note), `Token <id> revoked.` for
@@ -109,7 +66,6 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `ui.kv` contract), list rows and the empty note, the revoke payload
   (`{tokenId}`) and the refusal pass-through. Verified live against a real
   host: create, list, revoke, list-again, stop.
-
 - `openbutler daemon run [--listen HOST:PORT | --no-listen]` — the host in
   the foreground: the CLI runs the daemon executable with inherited stdio
   and hands back its exit status, so the start lock, the listener
@@ -119,7 +75,6 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   exiting 1), and a missing executable is the start sentence. Verified
   live: the foreground host answers `status`, stops on `daemon stop`, and
   the CLI exits 0 with the daemon's IPC line on stderr.
-
 - `openbutler daemon restart` — the source's one restart flow: the stop
   half asks the host's `stop` with the source's `restart` flag over one
   connection (so every other client hears the restart wording), waits at
@@ -131,7 +86,6 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   actually ships (`openbutler daemon restart`). Pins: the stop payload
   (`{"restart": true}`) against the fake daemon, the not-running
   tolerance, and the rendered closing lines.
-
 - `openbutler tui` — the interactive session (ratatui + crossterm, slim
   first). Three parts with one job each: `tui::model` decides (pure —
   keys, intents, patch application), `tui::render` draws (pinned through
@@ -145,7 +99,6 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   continuation, approval keys, question answers and dismissal, the list
   never opening a chat, selection clamping), four render tests, the
   terminal guard and one end-to-end refusal through the command tree.
-
 - `openbutler daemon start --listen HOST:PORT` / `--no-listen` — the
   remote listener preference. The write is the daemon's
   (`settings.set-listen`, validated by the rule the host binds by): a cold
@@ -155,7 +108,6 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   0). `--no-listen` clears it and prints the source's cleared note. Both
   halves pinned end to end against the fake daemon (payload + rendered
   lines).
-
 - `openbutler config` — the manager screen, rendered entirely from the
   daemon's `config.report`: MCP servers, default workspace, approval-mode
   label, the provider table (stored order, kind, keys, tool counts, the
@@ -171,7 +123,6 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `ui.ts` shapes, trailing `padEnd` included) is now the one render
   authority: `setup` moved onto it and `config` was built on it. Five
   pins.
-
 - `openbutler setup` — the first-run wizard. Prompts collect the
   provider id, required URL, masked keys and a free-text default model;
   the review builds one `settings.setup` payload and the daemon writes
@@ -255,3 +206,36 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (twenty-three e2e total): the exact render with an offset-rollover
   row, the empty sentence, the session/model scope, and the `--json`
   envelope shape.
+
+### Changed
+
+- `skills` prints the host table or its empty screen; the CLI no longer
+  lays it out.
+- `status` and `sessions` print the host's screens (`DaemonStatus.lines`,
+  `SessionListAnswer.lines`); a host that predates the screen says so
+  instead of printing nothing. The protocol's `ScreenLine`/`Tone` is the
+  one line shape, and `ui::screen` is the one glyph palette.
+- `about` and `config` print the host's finished lines; the CLI no longer
+  lays out either screen (the config layout — sections, provider table,
+  readiness block — left this crate for the host).
+- `openbutler logs` and `openbutler permissions` no longer decide anything:
+  the host reads the log file (`logs.tail`, absolute path, local-only) and
+  composes the permissions screen (`lines` with tones). The client applies
+  its glyph palette (`ui::screen`) and prints.
+- The installed binary is `openbutler` (`[[bin]] name` — the package
+  keeps the repo name), and the default data directory mirrors the
+  daemon's `openbutler-daemon` rule: the CLI and the host resolve the
+  same directory, and neither touches the legacy Node install's
+  `openbutler` data.
+- `openbutler usage` no longer reads `state.db`: the numbers live in the
+  daemon's `usage.report` (the label, the summary, the day buckets and the
+  rendered lines), and the command forwards the flags, prints the lines,
+  and — with `--json` — the host's `{label, summary, days}` envelope
+  unchanged. The CLI's `rusqlite` dependency went with the query.
+- Protocol rev bumped to `2a4a4af` (`SessionRecordWindow`): the windowed
+  `session.load` contract (tail window + `entriesFrom`/`totalEntries`,
+  older pages through `session.entries-range`) closes the 32 MiB
+  transcript gap on the daemon side, so the surface doc's gap list is
+  empty.
+
+[Unreleased]: https://github.com/m4rs1l/openbutler-cli/commits/main
