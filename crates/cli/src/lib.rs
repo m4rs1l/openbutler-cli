@@ -146,6 +146,12 @@ pub enum Command {
         #[arg(long, value_name = "PATH")]
         workspace: Option<String>,
     },
+    /// List, log and inspect scheduled wakeups.
+    Schedule {
+        /// list | log <id> | capabilities (bare: list).
+        #[arg(trailing_var_arg = true)]
+        words: Vec<String>,
+    },
     /// The global MCP server manager.
     Mcp {
         /// list | add | remove (bare: the interactive menu).
@@ -288,6 +294,7 @@ pub async fn execute(command: Command, data_dir: &std::path::Path) -> Result<Str
         // buffered path the guard fires first, so a non-terminal caller
         // gets the refusal sentence and no prompts.
         Command::Setup => commands::setup::run(data_dir).await.map(|()| String::new()),
+        Command::Schedule { words } => commands::schedule::run(data_dir, &words).await,
         Command::Mcp { action } => commands::mcp::run(data_dir, action).await,
         Command::Config => commands::config::run(data_dir).await,
         Command::About => commands::about::run(data_dir).await,

@@ -11,6 +11,7 @@ pub mod logs;
 pub mod mcp;
 pub mod permissions;
 pub mod run;
+pub mod schedule;
 pub mod sessions;
 pub mod setup;
 pub mod skills;
