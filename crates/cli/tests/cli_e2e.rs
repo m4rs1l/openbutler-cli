@@ -2063,6 +2063,10 @@ async fn keys_list_renders_the_table() {
         success(
             request,
             json!({
+                "lines": [
+                    { "tone": "plain", "text": "  PROVIDER  STATE  KEYS  ENDING" },
+                    { "tone": "plain", "text": "  mock      on     2     aaa1 bbb2" }
+                ],
                 "providers": [
                     { "id": "mock", "enabled": true, "keyCount": 2, "tails": ["…ne", "…wo"] },
                     { "id": "off", "enabled": false, "keyCount": 0, "tails": [] }
@@ -2078,14 +2082,26 @@ async fn keys_list_renders_the_table() {
     let lines: Vec<&str> = text.lines().collect();
     assert!(lines[0].starts_with("  PROVIDER"), "{:?}", lines[0]);
     assert!(lines[0].contains("ENDING"));
-    assert!(lines[2].contains("mock") && lines[2].contains("…ne …wo"));
-    assert!(lines[3].contains("off") && lines[3].contains("off"));
+    // The host sent two lines; this module prints them and nothing else.
+    assert_eq!(lines.len(), 2, "header and one row: {text:?}");
+    assert_eq!(lines[1], "  mock      on     2     aaa1 bbb2");
 }
 
 #[tokio::test]
 async fn keys_list_without_providers_says_so() {
     let dir = unique_dir("keys-empty");
-    let responder: Responder = Arc::new(|request| success(request, json!({ "providers": [] })));
+    let responder: Responder = Arc::new(|request| {
+        success(
+            request,
+            json!({
+                "providers": [],
+                "lines": [
+                    { "tone": "info", "text": "No provider is configured." },
+                    { "tone": "info", "text": "Add one with: openbutler keys add <provider>" }
+                ]
+            }),
+        )
+    });
     let _server = serve(&dir, responder);
 
     let text = execute(Command::Keys { command: None }, &dir)
@@ -2105,7 +2121,14 @@ async fn keys_add_collects_masked_keys_and_names_the_save() {
         assert_eq!(request.action, "keys.add");
         assert_eq!(request.payload["provider"], "mock");
         assert_eq!(request.payload["keys"], json!(["sk-one"]));
-        success(request, json!({ "provider": "mock", "added": 1 }))
+        success(
+            request,
+            json!({
+                "provider": "mock",
+                "added": 1,
+                "lines": [{ "tone": "success", "text": "mock: 1 key saved to the secret store." }]
+            }),
+        )
     });
     let _server = serve(&dir, responder);
 
@@ -2170,11 +2193,21 @@ async fn keys_remove_confirms_then_removes() {
     let responder: Responder = Arc::new(|request| match request.action.as_str() {
         "keys.list" => success(
             request,
-            json!({ "providers": [{ "id": "mock", "enabled": true, "keyCount": 2, "tails": [] }] }),
+            json!({
+                "providers": [{ "id": "mock", "enabled": true, "keyCount": 2, "tails": [] }],
+                "lines": []
+            }),
         ),
         "keys.remove" => {
             assert_eq!(request.payload["provider"], "mock");
-            success(request, json!({ "provider": "mock", "removed": 2 }))
+            success(
+                request,
+                json!({
+                    "provider": "mock",
+                    "removed": 2,
+                    "lines": [{ "tone": "success", "text": "mock: keys removed. The provider entry itself stays." }]
+                }),
+            )
         }
         other => panic!("unexpected action {other}"),
     });
@@ -2211,7 +2244,10 @@ async fn keys_remove_declined_writes_nothing() {
     let responder: Responder = Arc::new(move |request| match request.action.as_str() {
         "keys.list" => success(
             request,
-            json!({ "providers": [{ "id": "mock", "enabled": true, "keyCount": 1, "tails": [] }] }),
+            json!({
+                "providers": [{ "id": "mock", "enabled": true, "keyCount": 1, "tails": [] }],
+                "lines": []
+            }),
         ),
         other => {
             flag.store(true, Ordering::SeqCst);
@@ -2238,7 +2274,7 @@ async fn keys_remove_declined_writes_nothing() {
 async fn keys_remove_unknown_provider_surfaces_the_daemon_sentence() {
     let dir = unique_dir("keys-remove-unknown");
     let responder: Responder = Arc::new(|request| match request.action.as_str() {
-        "keys.list" => success(request, json!({ "providers": [] })),
+        "keys.list" => success(request, json!({ "providers": [], "lines": [] })),
         "keys.remove" => DaemonResponse::Failure {
             version: DAEMON_PROTOCOL_VERSION,
             id: request.id.clone(),

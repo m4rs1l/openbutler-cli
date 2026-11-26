@@ -28,16 +28,15 @@ pub fn guard(action: &str) -> String {
 #[derive(Deserialize)]
 struct Row {
     id: String,
-    enabled: bool,
     #[serde(rename = "keyCount")]
     key_count: u64,
-    tails: Vec<String>,
 }
 
 /// The `keys.list` answer.
 #[derive(Deserialize)]
 struct Listing {
     providers: Vec<Row>,
+    lines: Vec<crate::ui::ScreenLine>,
 }
 
 /// The command's shape, shared with the clap tree.
@@ -84,18 +83,12 @@ pub async fn run_with(
                 vec![("provider", json!(provider)), ("keys", json!(keys))],
             )
             .await?;
-            let added = result["added"].as_u64().unwrap_or(0);
-            if added == 0 {
-                return Ok(ui::info("Nothing added."));
-            }
-            let count = if added == 1 {
-                "1 key".to_owned()
-            } else {
-                format!("{added} keys")
-            };
-            Ok(ui::success(&format!(
-                "{provider}: {count} saved to the secret store."
-            )))
+            let lines: Vec<crate::ui::ScreenLine> = serde_json::from_value(result["lines"].clone())
+                .map_err(|source| CliError::Decode {
+                    action: "keys add",
+                    source,
+                })?;
+            Ok(ui::screen(&lines))
         }
         KeysRequest::Remove { provider } => {
             // One connection for both the count and the write: the view is
@@ -116,9 +109,6 @@ pub async fn run_with(
                 .iter()
                 .find(|row| row.id == provider)
                 .map(|row| row.key_count);
-            if count == Some(0) {
-                return Ok(ui::info(&format!("{provider} has no stored keys.")));
-            }
             if let Some(count) = count {
                 let plural = if count == 1 {
                     "1 key".to_owned()
@@ -137,12 +127,12 @@ pub async fn run_with(
                 vec![("provider", json!(provider))],
             )
             .await?;
-            if result["removed"].as_u64().unwrap_or(0) == 0 {
-                return Ok(ui::info(&format!("{provider} has no stored keys.")));
-            }
-            Ok(ui::success(&format!(
-                "{provider}: keys removed. The provider entry itself stays."
-            )))
+            let lines: Vec<crate::ui::ScreenLine> = serde_json::from_value(result["lines"].clone())
+                .map_err(|source| CliError::Decode {
+                    action: "keys remove",
+                    source,
+                })?;
+            Ok(ui::screen(&lines))
         }
     }
 }
@@ -150,26 +140,7 @@ pub async fn run_with(
 /// The table, or the source's two empty-screen lines.
 async fn list(data_dir: &Path) -> Result<String, CliError> {
     let listing = listing(data_dir).await?;
-    if listing.providers.is_empty() {
-        return Ok(format!(
-            "{}\n{}",
-            ui::info("No provider is configured."),
-            ui::info("Add one with: openbutler keys add <provider>")
-        ));
-    }
-    let rows: Vec<Vec<String>> = listing
-        .providers
-        .iter()
-        .map(|row| {
-            vec![
-                row.id.clone(),
-                if row.enabled { "on" } else { "off" }.to_owned(),
-                row.key_count.to_string(),
-                row.tails.join(" "),
-            ]
-        })
-        .collect();
-    Ok(ui::table(&["PROVIDER", "STATE", "KEYS", "ENDING"], &rows).join("\n"))
+    Ok(ui::screen(&listing.lines))
 }
 
 /// One `keys.list` round trip.
