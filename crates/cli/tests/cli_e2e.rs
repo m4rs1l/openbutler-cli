@@ -9,7 +9,8 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 use openbutler_cli::{
-    ActionsCommand, CliError, Command, DaemonCommand, EventsCommand, TokenCommand, execute,
+    ActionsCommand, CliError, Command, DaemonCommand, EventsCommand, TokenCommand,
+    WorkspaceCommand, execute,
 };
 use openbutler_protocol::status::TelegramState;
 use openbutler_protocol::{
@@ -1796,4 +1797,60 @@ async fn about_renders_the_host_answer() {
     // The source's closing `ui.line()`: the rendered text ends with the
     // blank line's newline.
     assert!(text.ends_with('\n'), "the screen ends blank: {text:?}");
+}
+
+// -------------------------------------------------------------- workspace
+
+#[tokio::test]
+async fn workspace_default_shows_the_stored_root_or_the_none_sentence() {
+    let dir = unique_dir("workspace-none");
+    let responder: Responder = Arc::new(|request| {
+        assert_eq!(request.action, "settings.set-default-workspace");
+        // A bare query carries no path at all.
+        assert!(request.payload.get("path").is_none());
+        success(request, json!({ "workspace": null }))
+    });
+    let _server = serve(&dir, responder);
+
+    let text = execute(
+        Command::Workspace {
+            command: WorkspaceCommand::Default { path: None },
+        },
+        &dir,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        text,
+        format!(
+            "  {:<22} {}",
+            "Default workspace", "(none; bare OpenButler uses the launch directory)"
+        )
+    );
+}
+
+#[tokio::test]
+async fn workspace_default_sends_the_path_and_names_the_saved_root() {
+    let dir = unique_dir("workspace-set");
+    let responder: Responder = Arc::new(|request| {
+        assert_eq!(request.action, "settings.set-default-workspace");
+        assert_eq!(request.payload["path"], "C:\\work\\proj");
+        success(request, json!({ "workspace": "C:\\work\\proj" }))
+    });
+    let _server = serve(&dir, responder);
+
+    let text = execute(
+        Command::Workspace {
+            command: WorkspaceCommand::Default {
+                path: Some("C:\\work\\proj".to_owned()),
+            },
+        },
+        &dir,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        text,
+        "\u{2714} Bare OpenButler launches will use C:\\work\\proj."
+    );
 }

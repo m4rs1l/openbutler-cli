@@ -25,6 +25,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- `openbutler workspace default [path]` — shows or saves the workspace
+  bare launches use, through the daemon
+  (`settings.set-default-workspace`); the path canonicalizes on the host,
+  and the CLI never reads or writes settings.
 - `openbutler about` — version, shell, runtime and the configuration
   paths from the daemon's `about.report` (the CLI prints the answer and
   adds nothing but its own version).

@@ -118,6 +118,11 @@ pub enum Command {
     Config,
     /// Version, shell, runtime and the configuration paths.
     About,
+    /// Choose the workspace bare launches use.
+    Workspace {
+        #[command(subcommand)]
+        command: WorkspaceCommand,
+    },
     /// The approval posture: mode, timeouts, review model.
     Permissions {
         /// workspace | auto-review | full-access (bare: show the current one).
@@ -138,6 +143,16 @@ pub enum Command {
 
 /// `openbutler daemon` subcommands; bare `daemon` means `status`, the
 /// source's default.
+/// `openbutler workspace` subcommands.
+#[derive(Debug, Clone, clap::Subcommand)]
+pub enum WorkspaceCommand {
+    /// Choose the workspace bare launches use (omit the path to show it).
+    Default {
+        /// The directory to use.
+        path: Option<String>,
+    },
+}
+
 #[derive(Debug, Clone, clap::Subcommand)]
 pub enum DaemonCommand {
     /// Show the running host and its report.
@@ -225,6 +240,9 @@ pub async fn execute(command: Command, data_dir: &std::path::Path) -> Result<Str
         Command::Setup => commands::setup::run(data_dir).await.map(|()| String::new()),
         Command::Config => commands::config::run(data_dir).await,
         Command::About => commands::about::run(data_dir).await,
+        Command::Workspace {
+            command: WorkspaceCommand::Default { path },
+        } => commands::workspace::run(data_dir, path).await,
         Command::Permissions {
             mode,
             review_timeout,

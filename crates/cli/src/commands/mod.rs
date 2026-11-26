@@ -13,6 +13,7 @@ pub mod sessions;
 pub mod setup;
 pub mod status;
 pub mod usage;
+pub mod workspace;
 
 use std::path::Path;
 
