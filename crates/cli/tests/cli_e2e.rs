@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-use openbutler_cli::{CliError, Command, DaemonCommand, execute};
+use openbutler_cli::{CliError, Command, DaemonCommand, TokenCommand, execute};
 use openbutler_protocol::status::TelegramState;
 use openbutler_protocol::{
     DAEMON_PROTOCOL_VERSION, DaemonRequest, DaemonResponse, DaemonStatus, FrameDecoder,
@@ -1432,4 +1432,143 @@ async fn daemon_run_reports_a_missing_executable() {
         .await
         .unwrap_err();
     assert!(error.to_string().contains("Could not start"), "{error}");
+}
+// ------------------------------------------------------- daemon token (S3)
+
+fn token_command(command: Option<TokenCommand>) -> Command {
+    Command::Daemon {
+        command: Some(DaemonCommand::Token { command }),
+    }
+}
+
+#[tokio::test]
+async fn daemon_token_create_prints_the_plaintext_once() {
+    let dir = unique_dir("daemon-token-create");
+    let responder: Responder = Arc::new(|request: &DaemonRequest| match request.action.as_str() {
+        "token.create" => success(
+            request,
+            json!({ "id": "deadbeefdeadbeef", "token": "obt_example_value" }),
+        ),
+        other => panic!("unexpected action {other}"),
+    });
+    let _server = serve(&dir, responder);
+
+    let text = execute(token_command(Some(TokenCommand::Create)), &dir)
+        .await
+        .unwrap();
+    let lines: Vec<&str> = text.lines().collect();
+    assert_eq!(
+        lines[0],
+        "\u{2714} Remote auth token created. The host keeps only a salted hash."
+    );
+    // ui.kv: two spaces, key padded to 22, one space, value (value byte 25).
+    assert_eq!(&lines[1][..2], "  ");
+    assert_eq!(lines[1][2..25].trim_end(), "Token id");
+    assert_eq!(&lines[1][25..], "deadbeefdeadbeef");
+    assert_eq!(lines[2][2..25].trim_end(), "Token");
+    assert_eq!(&lines[2][25..], "obt_example_value");
+    assert_eq!(
+        lines[3],
+        "\u{b7} Carry this token to the client now; it is not shown again."
+    );
+    assert_eq!(lines.len(), 4);
+}
+
+#[tokio::test]
+async fn daemon_token_list_renders_rows_or_the_empty_note() {
+    let dir = unique_dir("daemon-token-list");
+    let responder: Responder = Arc::new(|request: &DaemonRequest| match request.action.as_str() {
+        "token.list" => success(
+            request,
+            json!([
+                { "id": "0011223344556677", "createdAt": "2026-11-26T00:00:00.000Z" },
+                { "id": "8899aabbccddeeff", "createdAt": "2026-11-26T01:00:00.000Z" }
+            ]),
+        ),
+        other => panic!("unexpected action {other}"),
+    });
+    let _server = serve(&dir, responder);
+
+    let text = execute(token_command(None), &dir).await.unwrap();
+    let lines: Vec<&str> = text.lines().collect();
+    assert_eq!(lines.len(), 2, "bare `token` lists");
+    assert_eq!(&lines[0][25..], "2026-11-26T00:00:00.000Z");
+    assert_eq!(lines[0][2..25].trim_end(), "0011223344556677");
+    assert_eq!(&lines[1][25..], "2026-11-26T01:00:00.000Z");
+}
+
+#[tokio::test]
+async fn daemon_token_list_with_no_tokens_names_the_remedy() {
+    let dir = unique_dir("daemon-token-empty");
+    let responder: Responder = Arc::new(|request: &DaemonRequest| match request.action.as_str() {
+        "token.list" => success(request, json!([])),
+        other => panic!("unexpected action {other}"),
+    });
+    let _server = serve(&dir, responder);
+
+    let text = execute(token_command(Some(TokenCommand::List)), &dir)
+        .await
+        .unwrap();
+    assert_eq!(
+        text,
+        "\u{b7} No remote auth tokens. Create one with `openbutler daemon token create`."
+    );
+}
+
+#[tokio::test]
+async fn daemon_token_revoke_sends_the_id_and_prints_success() {
+    let dir = unique_dir("daemon-token-revoke");
+    let seen = Arc::new(std::sync::Mutex::new(None));
+    let responder: Responder = {
+        let seen = seen.clone();
+        Arc::new(
+            move |request: &DaemonRequest| match request.action.as_str() {
+                "token.revoke" => {
+                    *seen.lock().unwrap() = Some(Value::Object(request.payload.clone()));
+                    success(request, json!({ "revoked": true }))
+                }
+                other => panic!("unexpected action {other}"),
+            },
+        )
+    };
+    let _server = serve(&dir, responder);
+
+    let text = execute(
+        token_command(Some(TokenCommand::Revoke {
+            id: "deadbeefdeadbeef".to_owned(),
+        })),
+        &dir,
+    )
+    .await
+    .unwrap();
+    assert_eq!(text, "\u{2714} Token deadbeefdeadbeef revoked.");
+    assert_eq!(
+        seen.lock().unwrap().clone(),
+        Some(json!({ "tokenId": "deadbeefdeadbeef" }))
+    );
+}
+
+#[tokio::test]
+async fn daemon_token_revoke_surfaces_the_daemons_refusal() {
+    let dir = unique_dir("daemon-token-refusal");
+    let responder: Responder = Arc::new(|request: &DaemonRequest| DaemonResponse::Failure {
+        version: DAEMON_PROTOCOL_VERSION,
+        id: request.id.clone(),
+        ok: false,
+        error: "No token with id abc. List them with `openbutler daemon token list`.".to_owned(),
+    });
+    let _server = serve(&dir, responder);
+
+    let error = execute(
+        token_command(Some(TokenCommand::Revoke {
+            id: "abc".to_owned(),
+        })),
+        &dir,
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "No token with id abc. List them with `openbutler daemon token list`."
+    );
 }

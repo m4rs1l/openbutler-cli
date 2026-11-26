@@ -98,6 +98,11 @@ pub enum DaemonCommand {
         #[arg(long)]
         no_listen: bool,
     },
+    /// Remote auth tokens: mint, list, revoke (bare `token` lists).
+    Token {
+        #[command(subcommand)]
+        command: Option<TokenCommand>,
+    },
     /// Start the background host (or report the running one).
     Start {
         /// Save the remote listener every later boot binds (`host:port`).
@@ -106,6 +111,20 @@ pub enum DaemonCommand {
         /// Refuse the saved listener for this run and clear it.
         #[arg(long)]
         no_listen: bool,
+    },
+}
+
+/// `openbutler daemon token` subcommands (cli-main.ts L1750-1780).
+#[derive(Debug, Clone, clap::Subcommand)]
+pub enum TokenCommand {
+    /// Mint a token; the plaintext is printed once and never stored.
+    Create,
+    /// List minted tokens (id and creation time only).
+    List,
+    /// Revoke one token by id.
+    Revoke {
+        /// The token id `token list` printed.
+        id: String,
     },
 }
 
@@ -127,6 +146,7 @@ pub async fn execute(command: Command, data_dir: &std::path::Path) -> Result<Str
                     .await
                     .map(|_| String::new())
             }
+            DaemonCommand::Token { command } => commands::daemon::token(data_dir, command).await,
             DaemonCommand::Start { listen, no_listen } => {
                 commands::daemon::start(data_dir, listen, no_listen).await
             }

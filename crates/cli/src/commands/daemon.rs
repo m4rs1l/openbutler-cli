@@ -206,6 +206,78 @@ async fn stop_for_restart(data_dir: &Path) -> Result<(), CliError> {
     }
 }
 
+/// `openbutler daemon token [create|list|revoke <id>]` — remote auth
+/// tokens. Source: cli-main.ts L1750-1780 and `auth-tokens.ts`, read
+/// 2026-11-26; the store is the host's here (backend-owned: the CLI never
+/// reads or writes `auth-tokens.json`).
+pub async fn token(
+    data_dir: &Path,
+    command: Option<crate::TokenCommand>,
+) -> Result<String, CliError> {
+    match command.unwrap_or(crate::TokenCommand::List) {
+        crate::TokenCommand::Create => {
+            let result = commands::ask(data_dir, "token.create").await?;
+            let created: CreatedToken =
+                serde_json::from_value(result).map_err(|source| CliError::Decode {
+                    action: "token.create",
+                    source,
+                })?;
+            let mut lines = vec![crate::ui::success(
+                "Remote auth token created. The host keeps only a salted hash.",
+            )];
+            lines.push(crate::ui::kv("Token id", &created.id));
+            lines.push(crate::ui::kv("Token", &created.token));
+            lines.push(crate::ui::info(
+                "Carry this token to the client now; it is not shown again.",
+            ));
+            Ok(lines.join("\n"))
+        }
+        crate::TokenCommand::List => {
+            let result = commands::ask(data_dir, "token.list").await?;
+            let rows: Vec<TokenSummary> =
+                serde_json::from_value(result).map_err(|source| CliError::Decode {
+                    action: "token.list",
+                    source,
+                })?;
+            if rows.is_empty() {
+                return Ok(crate::ui::info(
+                    "No remote auth tokens. Create one with `openbutler daemon token create`.",
+                ));
+            }
+            Ok(rows
+                .iter()
+                .map(|row| crate::ui::kv(&row.id, &row.created_at))
+                .collect::<Vec<_>>()
+                .join("\n"))
+        }
+        crate::TokenCommand::Revoke { id } => {
+            let mut client = crate::client::Client::connect(data_dir).await?;
+            call_on(
+                &mut client,
+                "token.revoke",
+                Some(("tokenId", serde_json::json!(id))),
+            )
+            .await?;
+            Ok(crate::ui::success(&format!("Token {id} revoked.")))
+        }
+    }
+}
+
+/// The `token.create` answer: the id and the one-time plaintext.
+#[derive(serde::Deserialize)]
+struct CreatedToken {
+    id: String,
+    token: String,
+}
+
+/// One `token.list` row: the store never lists anything secret.
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TokenSummary {
+    id: String,
+    created_at: String,
+}
+
 /// `openbutler daemon pair` — mint one-time code a remote client
 /// redeems. The five-minute TTL lives daemon-side (`pair.create`), and
 /// the redeem command in the hint is the source's canonical form.

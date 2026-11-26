@@ -15,6 +15,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- `openbutler daemon token [create|list|revoke <id>]` — remote auth tokens
+  (bare `token` lists). The source's four `create` lines, one `kv` row per
+  token for `list` (or the source's empty note), `Token <id> revoked.` for
+  `revoke`. The store is the daemon's (`auth-tokens.json`, salted hashes;
+  the CLI never reads it) and the refusals are the daemon's sentences,
+  rendered verbatim. Pins: the four `create` lines (value byte 25, the
+  `ui.kv` contract), list rows and the empty note, the revoke payload
+  (`{tokenId}`) and the refusal pass-through. Verified live against a real
+  host: create, list, revoke, list-again, stop.
+
 - `openbutler daemon run [--listen HOST:PORT | --no-listen]` — the host in
   the foreground: the CLI runs the daemon executable with inherited stdio
   and hands back its exit status, so the start lock, the listener
