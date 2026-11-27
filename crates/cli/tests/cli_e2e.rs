@@ -2710,3 +2710,77 @@ async fn schedule_add_reads_the_file_and_prints_the_hosts_line() {
     .unwrap();
     assert!(text.contains("Timers are live."), "{text:?}");
 }
+// --- admin create ------------------------------------------------------------
+
+/// Answers from a script and claims a terminal, so the masked prompts stay
+/// exercised without a real tty.
+struct ScriptedPrompt(Vec<String>);
+
+impl openbutler_cli::commands::connect::SecretPrompt for ScriptedPrompt {
+    fn is_interactive(&self) -> bool {
+        true
+    }
+
+    fn ask(&mut self, _label: &str) -> Result<String, CliError> {
+        Ok(self.0.remove(0))
+    }
+}
+
+#[tokio::test]
+async fn admin_create_sends_the_payload_and_prints_only_the_host_line() {
+    let dir = unique_dir("admin-create");
+    let responder: Responder = Arc::new(|request| {
+        assert_eq!(request.action, "admin.create");
+        assert_eq!(
+            request.get("username").and_then(Value::as_str),
+            Some("owner")
+        );
+        assert_eq!(
+            request.get("password").and_then(Value::as_str),
+            Some("correct horse battery"),
+            "the password reaches the host as the terminal typed it"
+        );
+        DaemonResponse::Success {
+            version: DAEMON_PROTOCOL_VERSION,
+            id: request.id.clone(),
+            ok: true,
+            result: json!({
+                "username": "owner",
+                "lines": [{ "tone": "success", "text": "Admin account owner created." }]
+            }),
+        }
+    });
+    let _server = serve(&dir, responder);
+    let mut prompt = ScriptedPrompt(vec![
+        "correct horse battery".to_owned(),
+        "correct horse battery".to_owned(),
+    ]);
+    let text = openbutler_cli::commands::admin::create(&dir, "owner", &mut prompt)
+        .await
+        .expect("create succeeds");
+    assert_eq!(
+        text, "✔ Admin account owner created.",
+        "the client prints the host's sentence and adds nothing"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test]
+async fn admin_create_refuses_a_mismatch_before_anything_is_sent() {
+    let dir = unique_dir("admin-mismatch");
+    let mut prompt = ScriptedPrompt(vec![
+        "correct horse battery".to_owned(),
+        "something else".to_owned(),
+    ]);
+    let error = openbutler_cli::commands::admin::create(&dir, "owner", &mut prompt)
+        .await
+        .expect_err("the two prompts must agree");
+    assert_eq!(
+        error.to_string(),
+        openbutler_cli::commands::admin::MISMATCH,
+        "the confirmation never leaves the terminal"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

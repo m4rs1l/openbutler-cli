@@ -174,7 +174,7 @@ async fn stop_for_restart(data_dir: &Path) -> Result<(), CliError> {
     // One connection carries the probe and the ask, the same shape as
     // \`start_with\`: the host can never leave between the two and turn the
     // ask into a silent no-op.
-    let mut client = match crate::client::Client::connect(data_dir).await {
+    let mut client = match crate::client::Client::connect_local(data_dir).await {
         Ok(client) => client,
         Err(ClientError::Unreachable { .. }) => return Ok(()),
         Err(error) => return Err(CliError::Client(error)),
@@ -251,7 +251,7 @@ pub async fn token(
                 .join("\n"))
         }
         crate::TokenCommand::Revoke { id } => {
-            let mut client = crate::client::Client::connect(data_dir).await?;
+            let mut client = crate::client::Client::connect_local(data_dir).await?;
             call_on(
                 &mut client,
                 "token.revoke",
@@ -356,7 +356,7 @@ async fn start_status(
     // One connection carries the whole start: the probe and the write.
     // The source could probe and write without a host (its files were the
     // CLI's); here both are the daemon's, so a single socket does the run.
-    let connected = match crate::client::Client::connect(data_dir).await {
+    let connected = match crate::client::Client::connect_local(data_dir).await {
         Ok(client) => Some(client),
         Err(ClientError::Unreachable { .. }) => None,
         Err(error) => return Err(CliError::Client(error)),
@@ -400,7 +400,7 @@ async fn start_status(
     // directly, and the same value is now the saved preference so every
     // later boot binds it as well (the source persisted before spawning;
     // the write is the daemon's here, so it lands once the host answers).
-    let mut client = crate::client::Client::connect(data_dir).await?;
+    let mut client = crate::client::Client::connect_local(data_dir).await?;
     let status = decode_status(call_on(&mut client, "status", None).await?)?;
     let saved = persist_listen_on(&mut client, listen.as_deref(), no_listen).await?;
     Ok(Started {

@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `connect <host:port> <username>`: signs this client in to a host. The
+  password is prompted (masked, terminal only) and never an argument, because
+  argv is visible in the process list and lands in shell history. On success it
+  stores `backend.json` (the target, no secret) and a private
+  `credential.json` (the session), then prints the host's own status screen
+  and one line about its own file. `--forget` drops both.
+- `admin create <username>`: creates the admin account through the local host,
+  asking for the password twice; the confirmation never leaves the terminal.
+- A stored backend decides where later commands dial: `Client::connect`
+  presents the stored session as the connection's first frame. `daemon
+  start|stop|restart|run` keeps dialing the local endpoint, because those verbs
+  are about this machine's process.
+
+### Changed
+
+- The client resolves a connection in one place: a stored backend first, the
+  local endpoint otherwise, with no silent fallback between them — a stored
+  backend that fails to authenticate is an error, never a quiet question to the
+  local socket.
+
 - `daemon start --web` passes `--web` to the spawned host, which then
   serves the browser UI; `openbutler web` prints its pair URL. A host that
   is already running is reported unchanged.

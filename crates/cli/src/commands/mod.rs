@@ -3,7 +3,9 @@
 //! lives in [`ask`].
 
 pub mod about;
+pub mod admin;
 pub mod config;
+pub mod connect;
 pub mod daemon;
 pub mod keys;
 pub mod ledger;

@@ -7,6 +7,7 @@
 pub mod client;
 pub mod commands;
 pub mod data_dir;
+pub mod remote;
 pub mod tui;
 pub mod ui;
 
@@ -189,6 +190,21 @@ pub enum Command {
     },
     /// The interactive session (needs a real terminal).
     Tui,
+    /// Sign this client in to a host, or forget the stored backend.
+    Connect {
+        /// The host and port, e.g. 100.64.0.5:45280.
+        target: Option<String>,
+        /// The account username.
+        username: Option<String>,
+        /// Drop the stored backend instead of signing in.
+        #[arg(long)]
+        forget: bool,
+    },
+    /// The admin account on this machine.
+    Admin {
+        #[command(subcommand)]
+        command: AdminCommand,
+    },
 }
 
 /// `openbutler daemon` subcommands; bare `daemon` means `status`, the
@@ -217,6 +233,15 @@ pub enum WorkspaceCommand {
     Default {
         /// The directory to use.
         path: Option<String>,
+    },
+}
+
+#[derive(Debug, Clone, clap::Subcommand)]
+pub enum AdminCommand {
+    /// Create the admin account (masked prompts; needs a terminal).
+    Create {
+        /// The account username.
+        username: String,
     },
 }
 
@@ -355,6 +380,26 @@ pub async fn execute(command: Command, data_dir: &std::path::Path) -> Result<Str
         // The TUI owns the terminal; through this buffered path the guard
         // fires first, so a non-terminal caller gets the refusal sentence.
         Command::Tui => crate::tui::run(data_dir).await.map(|()| String::new()),
+        Command::Connect {
+            target,
+            username,
+            forget,
+        } => {
+            commands::connect::run(
+                data_dir,
+                target,
+                username,
+                forget,
+                &mut commands::connect::TerminalPrompt,
+            )
+            .await
+        }
+        Command::Admin {
+            command: AdminCommand::Create { username },
+        } => {
+            commands::admin::create(data_dir, &username, &mut commands::connect::TerminalPrompt)
+                .await
+        }
         // The buffered path (tests and callers without a terminal); the
         // binary streams a run straight to the real stdio.
         Command::Run { request } => {
@@ -400,6 +445,10 @@ pub enum CliError {
     /// from the machine log's own words, source-style).
     #[error("{0}")]
     Start(String),
+    /// The stored backend cannot be used (the message names the file and the
+    /// remedy).
+    #[error("{0}")]
+    Backend(String),
 }
 
 /// Parses real arguments, runs one command, prints, and picks the exit code:
