@@ -89,11 +89,12 @@ pub async fn run(
     let start_deadline = tokio::time::Instant::now() + options.start_timeout;
     let mut idle_deadline: Option<tokio::time::Instant> = None;
 
+    // The daemon reads one message object (text and images together), the
+    // same shape its parseQueuedMessage expects.
     let send = DaemonRequest::new(uuid::Uuid::new_v4().to_string(), "session.send")
-        .with("text", json!(options.request))
-        .with("images", json!([]))
+        .with("message", json!({ "text": options.request, "images": [] }))
         .with("workspaceKey", json!(workspace_key));
-    tokio::time::timeout_at(
+    let response = tokio::time::timeout_at(
         start_deadline,
         client.call_with_events(&send, |event| {
             render.apply(&event, out, err);
@@ -102,6 +103,10 @@ pub async fn run(
     .await
     .map_err(|_| start_failure())?
     .map_err(CliError::Client)?;
+    // A refusal is the daemon sentence, not a silent start failure.
+    if let DaemonResponse::Failure { error, .. } = response {
+        return Err(CliError::Answer(error));
+    }
 
     loop {
         let deadline = if !render.run_started {
@@ -163,9 +168,12 @@ pub async fn run(
             let reply = DaemonRequest::new(uuid::Uuid::new_v4().to_string(), "session.approve")
                 .with("approvalId", json!(approval_id))
                 .with("decision", json!(if allowed { "allow" } else { "deny" }));
-            client
+            let response = client
                 .call_with_events(&reply, |event| render.apply(&event, out, err))
                 .await?;
+            if let DaemonResponse::Failure { error, .. } = response {
+                return Err(CliError::Answer(error));
+            }
         } else if let Some(question) = render.question.take()
             && render.prompted_questions.insert(question.id.clone())
         {
@@ -179,9 +187,12 @@ pub async fn run(
                         None => Value::Null,
                     },
                 );
-            client
+            let response = client
                 .call_with_events(&reply, |event| render.apply(&event, out, err))
                 .await?;
+            if let DaemonResponse::Failure { error, .. } = response {
+                return Err(CliError::Answer(error));
+            }
         }
     }
 }

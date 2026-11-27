@@ -277,6 +277,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `run` and the TUI send the `message` object the daemon parses
+  (`{text, images}`) instead of flat `text`/`images`, and `run` surfaces a
+  refused send as the daemon sentence instead of waiting five seconds and
+  reporting "the host did not start the run".
+
 - The TUI grows a reasoning block as it streams. A text continuation was
   applied only to assistant entries, so the host's reasoning deltas were
   dropped and the thinking block stayed empty on screen for the whole run.

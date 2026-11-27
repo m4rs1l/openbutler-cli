@@ -185,8 +185,7 @@ async fn send(client: &mut Client, app: &mut App, text: String) -> Result<(), Cl
         return Ok(());
     }
     let request = DaemonRequest::new(id(), "session.send")
-        .with("text", json!(text))
-        .with("images", json!([]))
+        .with("message", json!({ "text": text, "images": [] }))
         .with("workspaceKey", json!(app.workspace_key));
     apply_with_events(client, app, request).await
 }

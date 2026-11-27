@@ -556,6 +556,47 @@ async fn a_run_streams_the_answer_and_exits_cleanly() {
 }
 
 #[tokio::test]
+async fn a_run_sends_one_message_object_and_surfaces_a_refusal() {
+    let dir = unique_dir("run-refusal");
+    let responder: Responder = Arc::new(|request: &DaemonRequest| match request.action.as_str() {
+        "attach" => success(request, attach_fixture()),
+        "session.send" => {
+            // The daemon's parser reads one message object; a flat text
+            // field is the wrong wire shape and would be refused there.
+            assert!(
+                request.payload.get("text").is_none(),
+                "flat text must not be sent"
+            );
+            let message = request.payload.get("message").expect("message object");
+            assert_eq!(message["text"], "say hello");
+            assert_eq!(message["images"], json!([]));
+            DaemonResponse::Failure {
+                version: DAEMON_PROTOCOL_VERSION,
+                id: request.id.clone(),
+                ok: false,
+                error: "the daemon refused the message".to_owned(),
+            }
+        }
+        other => panic!("unexpected action {other}"),
+    });
+    let _server = serve(&dir, responder);
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    let error = openbutler_cli::commands::run::run(
+        &dir,
+        openbutler_cli::commands::run::RunOptions::new("say hello"),
+        &mut out,
+        &mut err,
+    )
+    .await
+    .expect_err("a refusal must not look like a start");
+    assert!(
+        error.to_string().contains("the daemon refused the message"),
+        "{error}"
+    );
+}
+
+#[tokio::test]
 async fn a_stalled_run_stops_with_the_source_sentence() {
     let dir = unique_dir("run-stall");
     let steps = vec![
