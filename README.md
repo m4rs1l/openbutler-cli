@@ -10,6 +10,28 @@ command here turns into one request, and the screen it shows — tables, tones,
 sentences — is composed by the host and carried back line by line. The client
 applies its glyph palette and nothing else.
 
+## Install
+
+Linux (x86_64 or arm64):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/m4rs1l/openbutler-cli/main/install.sh | sh
+```
+
+Windows (PowerShell):
+
+```powershell
+irm https://raw.githubusercontent.com/m4rs1l/openbutler-cli/main/install.ps1 | iex
+```
+
+The installer downloads the release archive for this platform, verifies it
+against `SHA256SUMS`, installs `openbutler` into `~/.openbutler/bin`
+(`%USERPROFILE%\.openbutler\bin`), checks the installed binary, and writes a
+marker so a second run is a no-op. `--version`, `--prefix`, `--no-modify-path`
+and `--quiet` behave as they do in the host installer. Installing the host into
+the same prefix puts `openbutlerd` beside the client, which is where the client
+looks for it.
+
 ## Requirements
 
 - Rust 1.99.1 (pinned by `rust-toolchain.toml`; rustfmt and clippy included).
