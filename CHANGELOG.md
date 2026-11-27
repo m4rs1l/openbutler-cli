@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `openbutler daemon install [--web]` and `daemon uninstall`: the per-user
+  login entry that starts the host at sign-in - the Run key on Windows, a
+  systemd user unit on Linux. The entry runs `openbutlerd`, never the client,
+  removal is idempotent, and an entry that already belongs to another command is
+  refused rather than overwritten.
+
 - `openbutler approve [<n>]`: the auto-review denials the host numbered, and
   the one-shot retry granted for one of them. The screen is the host's; the
   client sends the number and prints the answer.

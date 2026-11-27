@@ -4,6 +4,7 @@
 //! envelopes from `openbutler-protocol`, and renders the state the daemon
 //! computed. No rule, filter, or count is produced here.
 
+pub mod autostart;
 pub mod client;
 pub mod commands;
 pub mod data_dir;
@@ -103,7 +104,7 @@ pub enum Command {
         #[arg(value_name = "REQUEST")]
         request: String,
     },
-    /// Background-host lifecycle: start, status, stop, restart, and foreground run.
+    /// Background-host lifecycle: start, status, stop, restart, foreground run, and the login entry.
     Daemon {
         #[command(subcommand)]
         command: Option<DaemonCommand>,
@@ -309,6 +310,14 @@ pub enum DaemonCommand {
         #[arg(long)]
         web: bool,
     },
+    /// Register the login entry that starts the host at sign-in.
+    Install {
+        /// Start the host with the browser UI as well.
+        #[arg(long)]
+        web: bool,
+    },
+    /// Remove the login entry.
+    Uninstall,
 }
 
 /// Runs one command and returns its rendered stdout text.
@@ -335,6 +344,8 @@ pub async fn execute(command: Command, data_dir: &std::path::Path) -> Result<Str
                 no_listen,
                 web,
             } => commands::daemon::start(data_dir, listen, no_listen, web).await,
+            DaemonCommand::Install { web } => commands::daemon::install(web),
+            DaemonCommand::Uninstall => commands::daemon::uninstall(),
         },
         Command::Stop => commands::daemon::stop(data_dir).await,
         Command::Approve { index } => commands::approve::run(data_dir, index).await,
@@ -557,6 +568,47 @@ pub fn main_entry() -> std::process::ExitCode {
         Err(error) => {
             eprintln!("openbutler: {error}");
             std::process::ExitCode::from(1)
+        }
+    }
+}
+
+#[cfg(test)]
+mod install_tests {
+    use super::{Cli, Command, DaemonCommand};
+    use clap::Parser;
+
+    /// The workspace forbids expect, tests included: a failed parse panics
+    /// with the error instead.
+    fn parse(arguments: &[&str]) -> Cli {
+        match Cli::try_parse_from(arguments) {
+            Ok(cli) => cli,
+            Err(error) => panic!("parse failed: {error}"),
+        }
+    }
+
+    #[test]
+    fn daemon_install_parses_with_and_without_the_web_flag() {
+        match parse(&["openbutler", "daemon", "install", "--web"]).command {
+            Some(Command::Daemon {
+                command: Some(DaemonCommand::Install { web: true }),
+            }) => {}
+            _ => panic!("expected daemon install --web"),
+        }
+        match parse(&["openbutler", "daemon", "install"]).command {
+            Some(Command::Daemon {
+                command: Some(DaemonCommand::Install { web: false }),
+            }) => {}
+            _ => panic!("expected daemon install"),
+        }
+    }
+
+    #[test]
+    fn daemon_uninstall_is_its_own_subcommand() {
+        match parse(&["openbutler", "daemon", "uninstall"]).command {
+            Some(Command::Daemon {
+                command: Some(DaemonCommand::Uninstall),
+            }) => {}
+            _ => panic!("expected daemon uninstall"),
         }
     }
 }

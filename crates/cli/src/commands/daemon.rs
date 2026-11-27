@@ -666,6 +666,20 @@ async fn status_pid(data_dir: &Path) -> Result<u32, CliError> {
     Ok(status_report(data_dir).await?.pid)
 }
 
+/// Registers the login entry that starts the host at sign-in.
+///
+/// The entry runs `openbutlerd`, never this client: a login must not open a
+/// terminal window, and the host is the thing that outlives the session.
+pub fn install(web: bool) -> Result<String, CliError> {
+    let entry = crate::autostart::Entry::new(resolve_daemon_exe()?, web);
+    crate::autostart::install(&entry)
+}
+
+/// Removes the login entry. Idempotent: nothing to remove is still success.
+pub fn uninstall() -> Result<String, CliError> {
+    crate::autostart::uninstall()
+}
+
 #[cfg(test)]
 mod tests {
     use super::render_restarted;
