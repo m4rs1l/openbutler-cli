@@ -23,7 +23,36 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 type Responder = Arc<dyn Fn(&DaemonRequest) -> DaemonResponse + Send + Sync>;
 
+/// One process-wide sweep of abandoned scratch trees. A test that panics or is
+/// cancelled cannot remove its directory, and gate runs would otherwise pile
+/// thousands of `ob-*` trees in the system temp area. Anything older than a day
+/// is by definition not a run in progress.
+fn sweep_stale_scratch() {
+    use std::sync::Once;
+    static ONCE: Once = Once::new();
+    ONCE.call_once(|| {
+        let Ok(entries) = std::fs::read_dir(std::env::temp_dir()) else {
+            return;
+        };
+        let cutoff = std::time::SystemTime::now() - std::time::Duration::from_secs(24 * 60 * 60);
+        for entry in entries.flatten() {
+            if !entry.file_name().to_string_lossy().starts_with("ob-") {
+                continue;
+            }
+            let abandoned = entry
+                .metadata()
+                .and_then(|meta| meta.modified())
+                .map(|stamp| stamp < cutoff)
+                .unwrap_or(false);
+            if abandoned && entry.path().is_dir() {
+                let _ = std::fs::remove_dir_all(entry.path());
+            }
+        }
+    });
+}
+
 fn unique_dir(tag: &str) -> PathBuf {
+    sweep_stale_scratch();
     use std::sync::atomic::AtomicUsize;
     static COUNTER: AtomicUsize = AtomicUsize::new(0);
     let dir = std::env::temp_dir().join(format!(
