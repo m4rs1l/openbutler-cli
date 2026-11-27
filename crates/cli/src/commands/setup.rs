@@ -203,11 +203,23 @@ impl Reviewer for DaemonReviewer {
 
     async fn providers(&self) -> Result<Vec<ProviderRow>, CliError> {
         let mut client = Client::connect(&self.data_dir).await?;
-        let request = DaemonRequest::new(uuid::Uuid::new_v4().to_string(), "catalog.listProviders");
-        let result = match client.call(&request).await? {
-            DaemonResponse::Success { result, .. } => result,
-            DaemonResponse::Failure { error, .. } => return Err(CliError::Answer(error)),
-        };
+        // The first ask starts the host's download and answers "not loaded";
+        // the picker waits for it instead of making the user run setup twice.
+        let mut result = Value::Null;
+        for attempt in 0..20 {
+            let request =
+                DaemonRequest::new(uuid::Uuid::new_v4().to_string(), "catalog.listProviders");
+            result = match client.call(&request).await? {
+                DaemonResponse::Success { result, .. } => result,
+                DaemonResponse::Failure { error, .. } => return Err(CliError::Answer(error)),
+            };
+            if result.get("loaded").and_then(Value::as_bool) == Some(true) {
+                break;
+            }
+            if attempt < 19 {
+                tokio::time::sleep(std::time::Duration::from_millis(700)).await;
+            }
+        }
         let mut rows = Vec::new();
         for row in result
             .get("providers")
