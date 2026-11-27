@@ -1,0 +1,113 @@
+name: release
+
+# One tag, one release: the three platform archives this repository owns. The
+# tag must carry the crate's version, and the built binary must answer
+# `openbutler --version` with the component label — a release that cannot say
+# what it is does not ship.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build (${{ matrix.asset }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - asset: linux-amd64
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - asset: linux-arm64
+            os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+          - asset: windows-amd64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      # Installs the exact toolchain pinned by rust-toolchain.toml.
+      - run: rustup show
+      - run: rustup target add ${{ matrix.target }}
+
+      - name: cross linker (linux arm64)
+        if: matrix.asset == 'linux-arm64'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> "$GITHUB_ENV"
+
+      - name: the tag carries the crate version
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          crate="$(grep -A3 '^\[workspace.package\]' Cargo.toml | grep -m1 '^version = ' | cut -d'"' -f2)"
+          if [ "$tag" != "$crate" ]; then
+            echo "tag v$tag does not match the workspace version $crate" >&2
+            exit 1
+          fi
+
+      - run: cargo build --release --target ${{ matrix.target }}
+
+      - name: assemble (linux)
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          stage="openbutler-${version}-${{ matrix.asset }}"
+          mkdir -p "$stage"
+          cp "target/${{ matrix.target }}/release/openbutler" "$stage/openbutler"
+          cp LICENSE README.md "$stage/"
+          tar -czf "${stage}.tar.gz" "$stage"
+          if [ "${{ matrix.asset }}" = "linux-amd64" ]; then
+            "./$stage/openbutler" --version
+          fi
+
+      - name: assemble (windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $version = $env:GITHUB_REF_NAME -replace '^v', ''
+          $stage = "openbutler-$version-${{ matrix.asset }}"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/openbutler.exe" "$stage/openbutler.exe"
+          Copy-Item LICENSE, README.md $stage
+          Compress-Archive -Path $stage -DestinationPath "$stage.zip"
+          & "./$stage/openbutler.exe" --version
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: |
+            openbutler-*.tar.gz
+            openbutler-*.zip
+          retention-days: 1
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: checksums
+        run: |
+          cd dist
+          sha256sum *.tar.gz *.zip > SHA256SUMS
+          cat SHA256SUMS
+      - name: publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --title "openbutler $version" \
+            --generate-notes

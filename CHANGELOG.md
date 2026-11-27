@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A release workflow: one tag publishes three platform archives
+  (`openbutler-<version>-<target>`) with `SHA256SUMS`. The tag must equal the
+  workspace version, and the built binary must answer `openbutler --version`
+  before the release is created.
 - `connect <host:port> <username>`: signs this client in to a host. The
   password is prompted (masked, terminal only) and never an argument, because
   argv is visible in the process list and lands in shell history. On success it
