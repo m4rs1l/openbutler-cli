@@ -5,7 +5,7 @@
 //! counts, the default pair, readiness sentences, the table layout, the
 //! line order — is made by the host (`config.report`), which answers the
 //! finished screen lines. This module prints them and applies its own glyph
-//! palette. Divergences are recorded in `docs/surface.md`:
+//! palette. Divergences are recorded here:
 //! - the source awaited the catalog download inside the command and printed
 //!   real tool counts on the first run; our host starts the download and
 //!   answers at once, so a first run shows `unknown` and the extra line

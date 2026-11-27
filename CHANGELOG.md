@@ -113,7 +113,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   label, the provider table (stored order, kind, keys, tool counts, the
   default row's model), the default pair with `(from usage)`, the
   reasoning line and readiness with the source's sentences. Divergences
-  are documented in the module and `docs/surface.md`: the daemon starts
+  are documented in the module: the daemon starts
   the catalog download instead of blocking on it (a first run shows
   `unknown` plus a note), the no-default hint says `run`, MCP rows are
   id-sorted. Three unit pins (full screen byte for byte, empty machine,
@@ -129,7 +129,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   both documents (backend-owned: the source's client-side file write is
   not ported). The terminal guard answers the source sentence when stdin
   is not a terminal (exit 1); cancel is Ctrl+D/EOF or the discard choice.
-  Divergences are documented in the module and in `docs/surface.md`:
+  Divergences are documented in the module:
   custom endpoints only, no npm prompt, plain numbered menus, closing
   hint says `run`. Five unit pins (transcript, refusals, discard/EOF,
   render helpers, guard) plus two end-to-end pins (guard exit over the
