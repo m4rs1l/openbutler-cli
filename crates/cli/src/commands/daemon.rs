@@ -508,7 +508,12 @@ async fn spawn_and_wait(
         .stderr(Stdio::from(stderr_handle));
 
     #[cfg(unix)]
-    command.process_group(0);
+    {
+        use std::os::unix::process::CommandExt;
+        // Its own process group: a signal aimed at the CLI must not take
+        // the host down with it.
+        command.process_group(0);
+    }
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -681,9 +686,13 @@ fn resolve_daemon_exe() -> Result<std::path::PathBuf, CliError> {
     if let Ok(current) = std::env::current_exe()
         && let Some(dir) = current.parent()
     {
-        let mut name = std::ffi::OsString::from("openbutler-daemon");
+        let name = std::ffi::OsString::from("openbutler-daemon");
         #[cfg(windows)]
-        name.push(".exe");
+        let name = {
+            let mut name = name;
+            name.push(".exe");
+            name
+        };
         let sibling = dir.join(name);
         if sibling.is_file() {
             return Ok(sibling);

@@ -268,56 +268,82 @@ struct Step {
 /// Answers each request from a script (action-checked) and pushes the
 /// scripted event frames after the response, like the real host flushes
 /// its pending events.
-#[cfg(windows)]
 fn serve_steps(dir: &Path, steps: Vec<Step>) -> tokio::task::JoinHandle<()> {
-    let name = openbutler_protocol::endpoint::endpoint_for(dir).socket_name();
-    let mut options = tokio::net::windows::named_pipe::ServerOptions::new();
-    options.first_pipe_instance(true);
-    let server = options.create(&name).unwrap();
-    tokio::spawn(async move {
-        let mut server = server;
-        server.connect().await.unwrap();
-        let mut decoder = FrameDecoder::new(MAX_DAEMON_FRAME_BYTES);
-        let mut buffer = vec![0u8; 8192];
-        let mut index = 0usize;
-        loop {
-            let read = server.read(&mut buffer).await.unwrap();
-            if read == 0 {
-                break;
-            }
-            for frame in decoder.append(&buffer[..read]).unwrap() {
-                let request: DaemonRequest = serde_json::from_slice(&frame).unwrap();
-                let step = steps
-                    .get(index)
-                    .unwrap_or_else(|| panic!("unexpected request #{index}: {}", request.action));
-                assert_eq!(request.action, step.action, "script step #{index}");
-                index += 1;
-                let response = match &step.error {
-                    Some(message) => DaemonResponse::Failure {
-                        version: DAEMON_PROTOCOL_VERSION,
-                        id: request.id.clone(),
-                        ok: false,
-                        error: (*message).to_owned(),
-                    },
-                    None => success(&request, step.result.clone()),
-                };
-                let mut bytes = serde_json::to_vec(&response).unwrap();
+    #[cfg(windows)]
+    {
+        let name = openbutler_protocol::endpoint::endpoint_for(dir).socket_name();
+        let mut options = tokio::net::windows::named_pipe::ServerOptions::new();
+        options.first_pipe_instance(true);
+        let server = options.create(&name).unwrap();
+        tokio::spawn(async move {
+            let mut server = server;
+            server.connect().await.unwrap();
+            steps_loop(&mut server, steps).await;
+        })
+    }
+    #[cfg(not(windows))]
+    {
+        let path = openbutler_protocol::endpoint::endpoint_for(dir)
+            .target()
+            .clone();
+        let openbutler_protocol::endpoint::Endpoint::UnixSocket(path) = path else {
+            panic!("posix endpoint must be a unix socket");
+        };
+        let _ = std::fs::remove_file(&path);
+        let listener = tokio::net::UnixListener::bind(&path).unwrap();
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            steps_loop(&mut stream, steps).await;
+        })
+    }
+}
+
+/// The scripted answers and event flushes, over whichever endpoint the
+/// platform uses.
+async fn steps_loop<S>(stream: &mut S, steps: Vec<Step>)
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
+    let mut decoder = FrameDecoder::new(MAX_DAEMON_FRAME_BYTES);
+    let mut buffer = vec![0u8; 8192];
+    let mut index = 0usize;
+    loop {
+        let read = stream.read(&mut buffer).await.unwrap();
+        if read == 0 {
+            break;
+        }
+        for frame in decoder.append(&buffer[..read]).unwrap() {
+            let request: DaemonRequest = serde_json::from_slice(&frame).unwrap();
+            let step = steps
+                .get(index)
+                .unwrap_or_else(|| panic!("unexpected request #{index}: {}", request.action));
+            assert_eq!(request.action, step.action, "script step #{index}");
+            index += 1;
+            let response = match &step.error {
+                Some(message) => DaemonResponse::Failure {
+                    version: DAEMON_PROTOCOL_VERSION,
+                    id: request.id.clone(),
+                    ok: false,
+                    error: (*message).to_owned(),
+                },
+                None => success(&request, step.result.clone()),
+            };
+            let mut bytes = serde_json::to_vec(&response).unwrap();
+            bytes.push(b'\n');
+            stream.write_all(&bytes).await.unwrap();
+            for event in &step.events {
+                let mut bytes = serde_json::to_vec(event).unwrap();
                 bytes.push(b'\n');
-                server.write_all(&bytes).await.unwrap();
-                for event in &step.events {
-                    let mut bytes = serde_json::to_vec(event).unwrap();
-                    bytes.push(b'\n');
-                    server.write_all(&bytes).await.unwrap();
-                }
-            }
-            // The script is the contract: once fulfilled the fake leaves
-            // the endpoint, which is how the stop flow observes a host
-            // that is actually gone.
-            if index == steps.len() {
-                break;
+                stream.write_all(&bytes).await.unwrap();
             }
         }
-    })
+        // The script is the contract: once fulfilled the fake leaves
+        // the endpoint, which is how the stop flow observes a host
+        // that is actually gone.
+        if index == steps.len() {
+            break;
+        }
+    }
 }
 
 fn run_meta(id: &str) -> openbutler_protocol::session::view::SessionMeta {
