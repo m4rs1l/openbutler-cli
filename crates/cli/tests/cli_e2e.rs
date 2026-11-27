@@ -540,6 +540,53 @@ fn reasoning_event(deltas: &[&str]) -> Value {
     .unwrap()
 }
 
+/// A patch that appends whole rows: the host sends the answer's opening row
+/// this way when it is created in the same publish that stamps the reasoning
+/// block.
+fn append_event(entries: Vec<openbutler_protocol::SessionEntry>) -> Value {
+    use openbutler_protocol::DaemonEvent;
+    use openbutler_protocol::session::{SessionEntriesPatch, SessionPatch};
+    serde_json::to_value(DaemonEvent::Patch {
+        version: DAEMON_PROTOCOL_VERSION,
+        patch: SessionPatch {
+            session: run_meta("sess-run"),
+            entries_patch: Some(SessionEntriesPatch::Delta {
+                append: entries,
+                replace: Vec::new(),
+                append_text: Vec::new(),
+            }),
+            run: run_state(true),
+            runtime: run_runtime(),
+        },
+    })
+    .unwrap()
+}
+
+/// One continuation of the row at `index` (the host labels it `text`).
+fn grow_event(index: i64, delta: &str) -> Value {
+    use openbutler_protocol::DaemonEvent;
+    use openbutler_protocol::session::patch::TextDelta;
+    use openbutler_protocol::session::{SessionEntriesPatch, SessionPatch, TextDeltaKind};
+    serde_json::to_value(DaemonEvent::Patch {
+        version: DAEMON_PROTOCOL_VERSION,
+        patch: SessionPatch {
+            session: run_meta("sess-run"),
+            entries_patch: Some(SessionEntriesPatch::Delta {
+                append: Vec::new(),
+                replace: Vec::new(),
+                append_text: vec![TextDelta {
+                    index,
+                    delta: delta.to_owned(),
+                    kind: TextDeltaKind::Text,
+                }],
+            }),
+            run: run_state(true),
+            runtime: run_runtime(),
+        },
+    })
+    .unwrap()
+}
+
 #[tokio::test]
 async fn a_run_streams_the_answer_and_exits_cleanly() {
     let dir = unique_dir("run-stream");
@@ -575,6 +622,65 @@ async fn a_run_streams_the_answer_and_exits_cleanly() {
     .unwrap();
 
     assert_eq!(String::from_utf8_lossy(&out), "Hello\n");
+    assert!(
+        err.is_empty(),
+        "stderr stays quiet: {}",
+        String::from_utf8_lossy(&err)
+    );
+}
+
+#[tokio::test]
+async fn a_run_prints_an_appended_answer_row_and_its_continuation() {
+    let dir = unique_dir("run-append");
+    let steps = vec![
+        Step {
+            action: "attach",
+            result: attach_fixture(),
+            error: None,
+            events: vec![busy_event()],
+        },
+        Step {
+            action: "session.send",
+            result: json!({ "accepted": true }),
+            error: None,
+            events: vec![
+                // The answer's opening row arrives whole, after the reasoning
+                // row it follows — the shape the host sends when the reasoning
+                // block's duration is stamped in the same publish.
+                append_event(vec![
+                    serde_json::from_value(json!({ "kind": "user", "at": 1, "text": "say hello" }))
+                        .unwrap(),
+                    serde_json::from_value(json!({
+                        "kind": "reasoning", "at": 2, "turnId": "t",
+                        "text": "the user wants a hello"
+                    }))
+                    .unwrap(),
+                    serde_json::from_value(
+                        json!({ "kind": "assistant", "at": 3, "turnId": "t", "text": "Mer" }),
+                    )
+                    .unwrap(),
+                ]),
+                grow_event(2, "haba"),
+                patch_event(false, &[]),
+            ],
+        },
+    ];
+    let _server = serve_steps(&dir, steps);
+
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    openbutler_cli::commands::run::run(
+        &dir,
+        openbutler_cli::commands::run::RunOptions::new("say hello"),
+        &mut out,
+        &mut err,
+    )
+    .await
+    .unwrap();
+
+    // The appended row and its continuation are one word: a client that only
+    // printed continuations would show "haba".
+    assert_eq!(String::from_utf8_lossy(&out), "Merhaba\n");
     assert!(
         err.is_empty(),
         "stderr stays quiet: {}",
