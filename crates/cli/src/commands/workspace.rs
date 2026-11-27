@@ -24,13 +24,7 @@ pub async fn run(data_dir: &Path, path: Option<String>) -> Result<String, CliErr
     }
     let mut client = crate::client::Client::connect(data_dir).await?;
     let result = super::daemon::call_fields(&mut client, ACTION, fields).await?;
-    let workspace = result.get("workspace").cloned().unwrap_or(Value::Null);
-    Ok(match (workspace.as_str(), path.is_some()) {
-        (Some(root), true) => ui::success(&format!("Bare OpenButler launches will use {root}.")),
-        (Some(root), false) => ui::kv("Default workspace", root),
-        (None, _) => ui::kv(
-            "Default workspace",
-            "(none; bare OpenButler uses the launch directory)",
-        ),
-    })
+    let lines: Vec<ui::ScreenLine> =
+        serde_json::from_value(result["lines"].clone()).unwrap_or_default();
+    Ok(ui::screen(&lines))
 }

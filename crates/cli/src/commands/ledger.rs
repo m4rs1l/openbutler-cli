@@ -66,27 +66,7 @@ async fn prune(
         ],
     )
     .await?;
-    let events = result.get("events").and_then(Value::as_u64).unwrap_or(0);
-    let actions = result.get("actions").and_then(Value::as_u64).unwrap_or(0);
-    let transitions = result
-        .get("transitions")
-        .and_then(Value::as_u64)
-        .unwrap_or(0);
-    let total = events + actions + transitions;
-    if total == 0 {
-        return Ok(crate::ui::info(&format!(
-            "No {kind} records are older than {older_than}; nothing to prune."
-        )));
-    }
-    let mut lines = vec![format!(
-        "  {events} event(s), {actions} action(s), {transitions} transition(s)"
-    )];
-    if yes {
-        lines.push(crate::ui::success(&format!("Pruned {total} record(s).")));
-    } else {
-        lines.push(crate::ui::info(&format!(
-            "Nothing was deleted; re-run with --yes to delete these {total} record(s)."
-        )));
-    }
-    Ok(lines.join("\n"))
+    let lines: Vec<crate::ui::ScreenLine> =
+        serde_json::from_value(result["lines"].clone()).unwrap_or_default();
+    Ok(crate::ui::screen(&lines))
 }

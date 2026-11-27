@@ -1770,7 +1770,10 @@ async fn prune_previews_with_the_source_lines() {
                     *seen.lock().unwrap() = Some(Value::Object(request.payload.clone()));
                     success(
                         request,
-                        json!({ "events": 2, "actions": 1, "transitions": 3 }),
+                        json!({ "events": 2, "actions": 1, "transitions": 3, "lines": [
+                            { "tone": "plain", "text": "  2 event(s), 1 action(s), 3 transition(s)" },
+                            { "tone": "info", "text": "Nothing was deleted; re-run with --yes to delete these 6 record(s)." }
+                        ] }),
                     )
                 }
                 other => panic!("unexpected action {other}"),
@@ -1814,7 +1817,10 @@ async fn prune_applies_with_the_success_line() {
                     *seen.lock().unwrap() = Some(Value::Object(request.payload.clone()));
                     success(
                         request,
-                        json!({ "events": 0, "actions": 4, "transitions": 2 }),
+                        json!({ "events": 0, "actions": 4, "transitions": 2, "lines": [
+                            { "tone": "plain", "text": "  0 event(s), 4 action(s), 2 transition(s)" },
+                            { "tone": "success", "text": "Pruned 6 record(s)." }
+                        ] }),
                     )
                 }
                 other => panic!("unexpected action {other}"),
@@ -1849,7 +1855,9 @@ async fn prune_with_nothing_to_delete_says_so() {
     let responder: Responder = Arc::new(|request: &DaemonRequest| match request.action.as_str() {
         "ledger.prune" => success(
             request,
-            json!({ "events": 0, "actions": 0, "transitions": 0 }),
+            json!({ "events": 0, "actions": 0, "transitions": 0, "lines": [
+                { "tone": "info", "text": "No actions records are older than 12h; nothing to prune." }
+            ] }),
         ),
         other => panic!("unexpected action {other}"),
     });
@@ -1916,7 +1924,15 @@ async fn workspace_default_shows_the_stored_root_or_the_none_sentence() {
         assert_eq!(request.action, "settings.set-default-workspace");
         // A bare query carries no path at all.
         assert!(request.payload.get("path").is_none());
-        success(request, json!({ "workspace": null }))
+        success(
+            request,
+            json!({
+                "workspace": null,
+                "lines": [
+                    { "tone": "plain", "text": format!("  {:<22} {}", "Default workspace", "(none; bare OpenButler uses the launch directory)") }
+                ]
+            }),
+        )
     });
     let _server = serve(&dir, responder);
 
@@ -1943,7 +1959,18 @@ async fn workspace_default_sends_the_path_and_names_the_saved_root() {
     let responder: Responder = Arc::new(|request| {
         assert_eq!(request.action, "settings.set-default-workspace");
         assert_eq!(request.payload["path"], "C:\\work\\proj");
-        success(request, json!({ "workspace": "C:\\work\\proj" }))
+        success(
+            request,
+            json!({
+                "workspace": "C:\\work\\proj",
+                "lines": [
+                    {
+                        "tone": "success",
+                        "text": "Bare OpenButler launches will use C:\\work\\proj."
+                    }
+                ]
+            }),
+        )
     });
     let _server = serve(&dir, responder);
 
