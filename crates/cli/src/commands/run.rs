@@ -254,8 +254,8 @@ fn prompt_question(question: &PendingQuestion, err: &mut dyn Write) -> Option<St
 struct Render {
     /// Entry index → the assistant text already printed (prefix diffs).
     assistant: BTreeMap<i64, String>,
-    /// Entry index → announced tool state (`result shown`).
-    tools: BTreeMap<i64, (String, bool)>,
+    /// The assistant row printed last: a new row starts on its own line.
+    last_assistant: Option<i64>,
     /// Notice ordinals printed so far (the source's visibleNoticeCount).
     notice_printed: usize,
     printed_text: bool,
@@ -370,8 +370,8 @@ impl Render {
         }
     }
 
-    /// One entry: assistant text by prefix diff, tool announce-once, and
-    /// nothing else (the one-shot lane shows notices, answers, tools).
+    /// One entry: assistant text by prefix diff, and nothing else. The lane
+    /// prints the answer; tool rows and their results stay in the transcript.
     fn render_entry(
         &mut self,
         index: i64,
@@ -379,67 +379,35 @@ impl Render {
         out: &mut dyn Write,
         _err: &mut dyn Write,
     ) {
-        match entry {
-            SessionEntry::Assistant { text, .. } => {
-                if text.is_empty() {
-                    return;
-                }
-                let previous = self.assistant.get(&index).map(String::as_str).unwrap_or("");
-                match text.strip_prefix(previous) {
-                    Some(delta) if !delta.is_empty() => {
-                        let _ = write!(out, "{delta}");
-                        self.printed_text = true;
-                    }
-                    Some(_) => {}
-                    None => {
-                        if self.printed_text {
-                            let _ = writeln!(out);
-                        }
-                        let _ = write!(out, "{text}");
-                        self.printed_text = true;
-                    }
-                }
-                self.assistant.insert(index, text.clone());
-            }
-            SessionEntry::Tool {
-                tool,
-                running,
-                preparing,
-                result,
-                command,
-                tool_title,
-                ..
-            } => {
-                if *preparing == Some(true) {
-                    return;
-                }
-                let name = tool
-                    .clone()
-                    .or_else(|| tool_title.clone())
-                    .or_else(|| command.clone())
-                    .unwrap_or_else(|| "tool".to_owned());
-                let running = *running == Some(true);
-                match self.tools.get_mut(&index) {
-                    None => {
-                        if self.printed_text {
-                            let _ = writeln!(out);
-                            let _ = writeln!(out);
-                        }
-                        let _ = writeln!(out, "Tool: {name}");
-                        if !running {
-                            let _ = writeln!(out, "{result}");
-                        }
-                        self.tools.insert(index, (name, !running));
-                    }
-                    Some(seen) => {
-                        if !seen.1 && !running {
-                            let _ = writeln!(out, "{result}");
-                            seen.1 = true;
-                        }
-                    }
-                }
-            }
-            _ => {}
+        let SessionEntry::Assistant { text, .. } = entry else {
+            return;
+        };
+        if text.is_empty() {
+            return;
         }
+        let previous = self.assistant.get(&index).map(String::as_str).unwrap_or("");
+        // A distinct entry is a distinct block of the answer (a preamble
+        // before a tool call, then the answer itself): it starts on its own
+        // line instead of gluing onto the previous one.
+        let new_block = self.printed_text && self.last_assistant != Some(index);
+        match text.strip_prefix(previous) {
+            Some(delta) if !delta.is_empty() => {
+                if new_block {
+                    let _ = writeln!(out);
+                }
+                let _ = write!(out, "{delta}");
+                self.printed_text = true;
+            }
+            Some(_) => {}
+            None => {
+                if self.printed_text {
+                    let _ = writeln!(out);
+                }
+                let _ = write!(out, "{text}");
+                self.printed_text = true;
+            }
+        }
+        self.last_assistant = Some(index);
+        self.assistant.insert(index, text.clone());
     }
 }

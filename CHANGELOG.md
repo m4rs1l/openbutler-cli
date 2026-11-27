@@ -241,6 +241,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   "your request will be sent to ..." line are gone. Reasoning continuations
   are labelled by the host and are never printed into the answer.
 
+- `run` prints only the answer. Tool rows and their results stay in the
+  transcript: the one-shot lane no longer writes `Tool: <name>` and the raw
+  result into stdout, so a run that calls a tool reads like an answer.
+  Two answer rows — a preamble before a tool call, then the answer — each
+  start on their own line instead of running together.
+
 - The client resolves a connection in one place: a stored backend first, the
   local endpoint otherwise, with no silent fallback between them — a stored
   backend that fails to authenticate is an error, never a quiet question to the

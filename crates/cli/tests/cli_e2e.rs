@@ -689,6 +689,73 @@ async fn a_run_prints_an_appended_answer_row_and_its_continuation() {
 }
 
 #[tokio::test]
+async fn a_run_prints_only_the_answer_when_the_turn_uses_a_tool() {
+    let dir = unique_dir("run-tool-quiet");
+    let steps = vec![
+        Step {
+            action: "attach",
+            result: attach_fixture(),
+            error: None,
+            events: vec![busy_event()],
+        },
+        Step {
+            action: "session.send",
+            result: json!({ "accepted": true }),
+            error: None,
+            events: vec![
+                // A preamble entry, then the tool row and its result: the row
+                // belongs to the transcript, not to the one-shot lane's output.
+                append_event(vec![
+                    serde_json::from_value(json!({
+                        "kind": "assistant", "at": 1, "turnId": "t",
+                        "text": "I'll check the installed Docker tooling."
+                    }))
+                    .unwrap(),
+                ]),
+                append_event(vec![
+                    serde_json::from_value(json!({
+                        "kind": "tool", "at": 2, "turnId": "t",
+                        "tool": "execute_command", "running": false,
+                        "result": "/usr/bin/docker\nDocker version 29.8.2"
+                    }))
+                    .unwrap(),
+                ]),
+                append_event(vec![
+                    serde_json::from_value(json!({
+                        "kind": "assistant", "at": 3, "turnId": "t",
+                        "text": "Docker is installed."
+                    }))
+                    .unwrap(),
+                ]),
+                patch_event(false, &[]),
+            ],
+        },
+    ];
+    let _server = serve_steps(&dir, steps);
+
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    openbutler_cli::commands::run::run(
+        &dir,
+        openbutler_cli::commands::run::RunOptions::new("is docker installed?"),
+        &mut out,
+        &mut err,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        String::from_utf8_lossy(&out),
+        "I'll check the installed Docker tooling.\nDocker is installed.\n"
+    );
+    assert!(
+        err.is_empty(),
+        "stderr stays quiet: {}",
+        String::from_utf8_lossy(&err)
+    );
+}
+
+#[tokio::test]
 async fn a_run_sends_one_message_object_and_surfaces_a_refusal() {
     let dir = unique_dir("run-refusal");
     let responder: Responder = Arc::new(|request: &DaemonRequest| match request.action.as_str() {
