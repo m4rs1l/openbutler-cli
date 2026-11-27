@@ -237,6 +237,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `run` prints the answer, not a banner: the model/provider header and the
+  "your request will be sent to ..." line are gone. Reasoning continuations
+  are labelled by the host and are never printed into the answer.
+
 - The client resolves a connection in one place: a stored backend first, the
   local endpoint otherwise, with no silent fallback between them — a stored
   backend that fails to authenticate is an error, never a quiet question to the

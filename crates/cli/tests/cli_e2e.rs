@@ -483,7 +483,7 @@ fn busy_event() -> Value {
 fn patch_event(busy: bool, deltas: &[&str]) -> Value {
     use openbutler_protocol::DaemonEvent;
     use openbutler_protocol::session::patch::TextDelta;
-    use openbutler_protocol::session::{SessionEntriesPatch, SessionPatch};
+    use openbutler_protocol::session::{SessionEntriesPatch, SessionPatch, TextDeltaKind};
     serde_json::to_value(DaemonEvent::Patch {
         version: DAEMON_PROTOCOL_VERSION,
         patch: SessionPatch {
@@ -499,11 +499,41 @@ fn patch_event(busy: bool, deltas: &[&str]) -> Value {
                         .map(|delta| TextDelta {
                             index: 0,
                             delta: (*delta).to_owned(),
+                            kind: TextDeltaKind::Text,
                         })
                         .collect(),
                 })
             },
             run: run_state(busy),
+            runtime: run_runtime(),
+        },
+    })
+    .unwrap()
+}
+
+/// The same patch with the continuations labelled as reasoning: the one-shot
+/// lane must not print them into the answer.
+fn reasoning_event(deltas: &[&str]) -> Value {
+    use openbutler_protocol::DaemonEvent;
+    use openbutler_protocol::session::patch::TextDelta;
+    use openbutler_protocol::session::{SessionEntriesPatch, SessionPatch, TextDeltaKind};
+    serde_json::to_value(DaemonEvent::Patch {
+        version: DAEMON_PROTOCOL_VERSION,
+        patch: SessionPatch {
+            session: run_meta("sess-run"),
+            entries_patch: Some(SessionEntriesPatch::Delta {
+                append: Vec::new(),
+                replace: Vec::new(),
+                append_text: deltas
+                    .iter()
+                    .map(|delta| TextDelta {
+                        index: 1,
+                        delta: (*delta).to_owned(),
+                        kind: TextDeltaKind::Reasoning,
+                    })
+                    .collect(),
+            }),
+            run: run_state(true),
             runtime: run_runtime(),
         },
     })
@@ -524,7 +554,11 @@ async fn a_run_streams_the_answer_and_exits_cleanly() {
             action: "session.send",
             result: json!({ "accepted": true }),
             error: None,
-            events: vec![patch_event(true, &["Hel", "lo"]), patch_event(false, &[])],
+            events: vec![
+                reasoning_event(&["the user", " wants", " a hello"]),
+                patch_event(true, &["Hel", "lo"]),
+                patch_event(false, &[]),
+            ],
         },
     ];
     let _server = serve_steps(&dir, steps);
@@ -540,14 +574,7 @@ async fn a_run_streams_the_answer_and_exits_cleanly() {
     .await
     .unwrap();
 
-    assert_eq!(
-        String::from_utf8_lossy(&out),
-        "OpenButler agent\n\
-         Model: Test Model / demo\n\
-         Provider: MockProvider\n\
-         Your request, tool definitions, and approved tool results will be sent to MockProvider.\n\
-         Hello\n"
-    );
+    assert_eq!(String::from_utf8_lossy(&out), "Hello\n");
     assert!(
         err.is_empty(),
         "stderr stays quiet: {}",
@@ -634,10 +661,7 @@ async fn a_stalled_run_stops_with_the_source_sentence() {
         error.to_string(),
         "One-shot run stopped: no session progress was reported for 10 minutes."
     );
-    assert_eq!(
-        String::from_utf8_lossy(&out),
-        "OpenButler agent\nModel: Test Model / demo\nProvider: MockProvider\nYour request, tool definitions, and approved tool results will be sent to MockProvider.\nstarted"
-    );
+    assert_eq!(String::from_utf8_lossy(&out), "started");
 }
 
 #[tokio::test]

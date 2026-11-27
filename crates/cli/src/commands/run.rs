@@ -15,9 +15,10 @@ use std::path::Path;
 use std::time::Duration;
 
 use openbutler_protocol::entry::SessionEntry;
+use openbutler_protocol::session::TextDeltaKind;
 use openbutler_protocol::session::run::{PendingQuestion, RunState, ToolCallRequest};
 use openbutler_protocol::{
-    AttachResult, DaemonEvent, DaemonRequest, DaemonResponse, RuntimeViewData, SessionEntriesPatch,
+    AttachResult, DaemonEvent, DaemonRequest, DaemonResponse, SessionEntriesPatch,
 };
 use serde_json::{Value, json};
 
@@ -66,20 +67,6 @@ pub async fn run(
             action: "attach",
             source,
         })?;
-
-    // The header (the source's section/kv/info, in plain text).
-    let runtime: &RuntimeViewData = &attach.runtime;
-    let destination = runtime
-        .provider_name
-        .as_deref()
-        .unwrap_or(&runtime.provider_id);
-    let _ = writeln!(out, "OpenButler agent");
-    let _ = writeln!(out, "Model: {} / {}", runtime.model_name, runtime.model_id);
-    let _ = writeln!(out, "Provider: {destination}");
-    let _ = writeln!(
-        out,
-        "Your request, tool definitions, and approved tool results will be sent to {destination}."
-    );
 
     let workspace_key = attach.workspace_key.unwrap_or_default();
     let mut render = Render::default();
@@ -367,7 +354,9 @@ impl Render {
                     self.render_entry(replaced.index, &replaced.entry, out, err);
                 }
                 for delta in append_text {
-                    if delta.delta.is_empty() {
+                    // A reasoning continuation is labelled as such by the host;
+                    // this lane prints the answer, not the thinking.
+                    if delta.kind != TextDeltaKind::Text || delta.delta.is_empty() {
                         continue;
                     }
                     let _ = write!(out, "{}", delta.delta);

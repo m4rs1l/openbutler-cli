@@ -906,7 +906,7 @@ checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
 name = "openbutler-cli"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "chrono",
  "clap",
@@ -924,7 +924,7 @@ dependencies = [
 [[package]]
 name = "openbutler-protocol"
 version = "0.0.1"
-source = "git+https://github.com/m4rs1l/openbutler-protocol?rev=19ef310#19ef310b23b210bf91033aaab7503b244ae6593b"
+source = "git+https://github.com/m4rs1l/openbutler-protocol?rev=7bf0808#7bf08088a9062eb3b183391d2ba0c9a5230996e5"
 dependencies = [
  "serde",
  "serde_json",
