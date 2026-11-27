@@ -719,14 +719,8 @@ fn render_started(
     was_running: bool,
 ) -> String {
     let mut text = String::new();
-    text.push_str(
-        "The machine custodian and its workspace runtime initialize when a TUI or Telegram turn arrives.",
-    );
+    text.push_str("The machine custodian starts when a TUI turn arrives.");
     text.push_str(&format!("\nBackground host running (pid {}).", status.pid));
-    text.push_str(&format!(
-        "\n{:<14} {}",
-        "workspaces:", status.workspace_count
-    ));
     if let Some(entry) = &status.entry {
         text.push_str(&format!("\n{:<14} {}", "entry:", entry));
     }

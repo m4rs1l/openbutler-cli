@@ -12,10 +12,9 @@ use openbutler_cli::{
     ActionsCommand, CliError, Command, DaemonCommand, EventsCommand, SessionsCommand, TokenCommand,
     WorkspaceCommand, execute,
 };
-use openbutler_protocol::status::TelegramState;
 use openbutler_protocol::{
     DAEMON_PROTOCOL_VERSION, DaemonRequest, DaemonResponse, DaemonStatus, FrameDecoder,
-    MAX_DAEMON_FRAME_BYTES, TelegramStatus,
+    MAX_DAEMON_FRAME_BYTES,
 };
 use serde_json::{Value, json};
 use std::time::Duration;
@@ -134,25 +133,16 @@ async fn status_renders_the_host_report_line_by_line() {
             web: None,
             pid: 4242,
             started_at: "2026-11-22T01:02:03Z".to_owned(),
-            workspace_count: 3,
             connected_clients: 1,
             schedules: Some(4),
-            telegram: Some(TelegramStatus {
-                state: TelegramState::Polling,
-                paired: true,
-                username: Some("helper_bot".to_owned()),
-                error: None,
-            }),
             unresponsive: None,
             entry: Some("dist/index.js".to_owned()),
             build_id: Some(None),
             lines: vec![
                 openbutler_protocol::ScreenLine::plain("pid:           4242"),
                 openbutler_protocol::ScreenLine::plain("started:       2026-11-22T01:02:03Z"),
-                openbutler_protocol::ScreenLine::plain("workspaces:    3"),
                 openbutler_protocol::ScreenLine::plain("clients:       1"),
                 openbutler_protocol::ScreenLine::plain("schedules:     4"),
-                openbutler_protocol::ScreenLine::plain("telegram:      polling (@helper_bot)"),
                 openbutler_protocol::ScreenLine::plain("entry:         dist/index.js"),
                 openbutler_protocol::ScreenLine::plain("build:         source"),
             ],
@@ -166,10 +156,8 @@ async fn status_renders_the_host_report_line_by_line() {
         text,
         "pid:           4242\n\
          started:       2026-11-22T01:02:03Z\n\
-         workspaces:    3\n\
          clients:       1\n\
          schedules:     4\n\
-         telegram:      polling (@helper_bot)\n\
          entry:         dist/index.js\n\
          build:         source"
     );
@@ -655,10 +643,8 @@ fn status_fixture(pid: u32) -> Value {
     let status = DaemonStatus {
         pid,
         started_at: "2026-11-22T02:00:00Z".to_owned(),
-        workspace_count: 1,
         connected_clients: 2,
         schedules: None,
-        telegram: None,
         unresponsive: None,
         entry: None,
         web: None,
@@ -666,7 +652,6 @@ fn status_fixture(pid: u32) -> Value {
         lines: vec![
             openbutler_protocol::ScreenLine::plain(format!("pid:           {pid}")),
             openbutler_protocol::ScreenLine::plain("started:       2026-11-22T02:00:00Z"),
-            openbutler_protocol::ScreenLine::plain("workspaces:    1"),
             openbutler_protocol::ScreenLine::plain("clients:       2"),
         ],
     };
@@ -806,9 +791,8 @@ async fn daemon_start_reports_the_running_host_without_spawning() {
     .unwrap();
     assert_eq!(
         text,
-        "The machine custodian and its workspace runtime initialize when a TUI or Telegram turn arrives.\n\
+        "The machine custodian starts when a TUI turn arrives.\n\
          Background host running (pid 77).\n\
-         workspaces:    1\n\
          It stays alive after this terminal closes. Stop it with `openbutler daemon stop`."
     );
 }

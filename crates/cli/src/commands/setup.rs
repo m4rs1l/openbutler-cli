@@ -87,14 +87,60 @@ pub async fn save(data_dir: &Path, payload: Value) -> Result<String, CliError> {
     }
 }
 
+/// One provider row from the host's catalog.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ProviderRow {
+    /// Catalog id, the value saved as the provider id.
+    pub id: String,
+    /// Display name for the picker.
+    pub name: String,
+    /// How many models the catalog lists for it.
+    pub models: u64,
+    /// The package that speaks it, when the catalog names one.
+    pub npm: Option<String>,
+}
+
+/// One model row from the host's catalog.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ModelRow {
+    /// The model id the catalog keys it under.
+    pub id: String,
+    /// Display name for the picker.
+    pub name: String,
+}
+
 /// What the wizard needs from the host: the Review screen's finished
-/// lines. The layout is the host's decision; the client only applies its
-/// glyph palette.
+/// lines, the host's own paths, and its catalog. The layout is the host's
+/// decision; the client only applies its glyph palette and draws menus.
 pub trait Reviewer {
     fn review(
         &self,
         payload: &Value,
     ) -> impl std::future::Future<Output = Result<Vec<ScreenLine>, CliError>>;
+
+    /// The host's paths for the header: data directory and settings file.
+    /// A reviewer without a host answers empty and the wizard falls back to
+    /// the local path it was given.
+    fn paths(&self) -> impl std::future::Future<Output = Result<(String, String), CliError>> {
+        async { Ok((String::new(), String::new())) }
+    }
+
+    /// The host's catalog providers. Empty means the host has none yet; the
+    /// wizard then offers custom endpoints only.
+    fn providers(&self) -> impl std::future::Future<Output = Result<Vec<ProviderRow>, CliError>> {
+        async { Ok(Vec::new()) }
+    }
+
+    /// One provider's models; empty means the id must be typed.
+    fn models(
+        &self,
+        provider: &str,
+    ) -> impl std::future::Future<Output = Result<Vec<ModelRow>, CliError>> {
+        async move {
+            let _ = provider;
+            Ok(Vec::new())
+        }
+    }
 }
 
 /// The production reviewer: one `settings.setup.review` call, so the
@@ -134,6 +180,92 @@ impl Reviewer for DaemonReviewer {
             DaemonResponse::Failure { error, .. } => Err(CliError::Answer(error)),
         }
     }
+
+    async fn paths(&self) -> Result<(String, String), CliError> {
+        let mut client = Client::connect(&self.data_dir).await?;
+        let request = DaemonRequest::new(uuid::Uuid::new_v4().to_string(), "about.report");
+        match client.call(&request).await? {
+            DaemonResponse::Success { result, .. } => {
+                let settings = result
+                    .get("settingsPath")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned();
+                let data = std::path::Path::new(&settings)
+                    .parent()
+                    .map(|parent| parent.display().to_string())
+                    .unwrap_or_default();
+                Ok((data, settings))
+            }
+            DaemonResponse::Failure { error, .. } => Err(CliError::Answer(error)),
+        }
+    }
+
+    async fn providers(&self) -> Result<Vec<ProviderRow>, CliError> {
+        let mut client = Client::connect(&self.data_dir).await?;
+        let request = DaemonRequest::new(uuid::Uuid::new_v4().to_string(), "catalog.listProviders");
+        let result = match client.call(&request).await? {
+            DaemonResponse::Success { result, .. } => result,
+            DaemonResponse::Failure { error, .. } => return Err(CliError::Answer(error)),
+        };
+        let mut rows = Vec::new();
+        for row in result
+            .get("providers")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            rows.push(ProviderRow {
+                id: row
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned(),
+                name: row
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned(),
+                models: row.get("models").and_then(Value::as_u64).unwrap_or(0),
+                npm: row.get("npm").and_then(Value::as_str).map(str::to_owned),
+            });
+        }
+        Ok(rows)
+    }
+
+    async fn models(&self, provider: &str) -> Result<Vec<ModelRow>, CliError> {
+        let mut client = Client::connect(&self.data_dir).await?;
+        let mut request =
+            DaemonRequest::new(uuid::Uuid::new_v4().to_string(), "catalog.listModels");
+        request
+            .payload
+            .insert("provider".to_owned(), json!(provider));
+        let result = match client.call(&request).await? {
+            DaemonResponse::Success { result, .. } => result,
+            DaemonResponse::Failure { error, .. } => return Err(CliError::Answer(error)),
+        };
+        let mut rows = Vec::new();
+        for row in result
+            .get("models")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            rows.push(ModelRow {
+                id: row
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned(),
+                name: row
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned(),
+            });
+        }
+        Ok(rows)
+    }
 }
 
 /// What the walk decided: save these answers, or write nothing.
@@ -146,6 +278,7 @@ enum Outcome {
 struct Collected {
     id: String,
     url: String,
+    npm: Option<String>,
     keys: Vec<String>,
 }
 
@@ -167,16 +300,23 @@ async fn walk_inner<T: Term, R: Reviewer>(
     data_dir: &Path,
     reviewer: &R,
 ) -> Result<Option<Outcome>, CliError> {
+    // The header names the host's paths, not the client's: a remote
+    // session writes on the host, and a local path here would lie.
+    let (host_data, host_settings) = reviewer.paths().await.unwrap_or_default();
+    let data_label = if host_data.is_empty() {
+        data_dir.display().to_string()
+    } else {
+        host_data
+    };
+    let settings_label = if host_settings.is_empty() {
+        data_dir.join("settings.yaml").display().to_string()
+    } else {
+        host_settings
+    };
     term.write("");
     term.write(&crate::ui::section("Setup"));
-    term.write(&crate::ui::kv(
-        "Data directory",
-        &data_dir.display().to_string(),
-    ));
-    term.write(&crate::ui::kv(
-        "Settings file",
-        &data_dir.join("settings.yaml").display().to_string(),
-    ));
+    term.write(&crate::ui::kv("Data directory", &data_label));
+    term.write(&crate::ui::kv("Settings file", &settings_label));
     term.write("\u{b7} Settings are written at the last step. Ctrl+C cancels before saving.");
 
     let mut collected: Vec<Collected> = Vec::new();
@@ -186,9 +326,12 @@ async fn walk_inner<T: Term, R: Reviewer>(
     loop {
         term.write("");
         term.write(&crate::ui::section("LLM providers"));
-        // This build has no catalog; the source prints exactly this when
-        // the index cannot load (setup.ts L322), and it is permanent here.
-        term.write("! Catalog unavailable; only custom endpoints can be configured.");
+        // The host's catalog decides: a list means pick one, no list means
+        // custom endpoints only, with the source's sentence for that case.
+        let catalog = reviewer.providers().await.unwrap_or_default();
+        if catalog.is_empty() {
+            term.write("! Catalog unavailable; only custom endpoints can be configured.");
+        }
 
         // The first pass must configure a provider (the source's machine
         // cannot leave the section otherwise); a later pass — `Back to
@@ -202,7 +345,7 @@ async fn walk_inner<T: Term, R: Reviewer>(
             answer
         };
         if add {
-            let Some(()) = collect_until_declined(term, &mut collected) else {
+            let Some(()) = collect_until_declined(term, &mut collected, &catalog) else {
                 return Ok(None);
             };
             first_pass = false;
@@ -214,15 +357,33 @@ async fn walk_inner<T: Term, R: Reviewer>(
                 return Ok(None);
             };
             let provider = ids[chosen].to_owned();
-            term.write(&format!(
-                "! No model in the catalog for {provider}; type the model id."
-            ));
-            let Some(raw) = input(term, &format!("Model id for {provider}")) else {
-                return Ok(None);
+            let models = reviewer.models(&provider).await.unwrap_or_default();
+            // A picker stops being a picker past a hundred rows; the id is
+            // typed then, and an empty answer sets nothing (the pair never
+            // half-moves).
+            let chosen_model = if models.is_empty() || models.len() > 100 {
+                if models.is_empty() {
+                    term.write(&format!(
+                        "! No model in the catalog for {provider}; type the model id."
+                    ));
+                } else {
+                    term.write(&format!(
+                        "! {provider} lists {} models; type the model id.",
+                        models.len()
+                    ));
+                }
+                input(term, &format!("Model id for {provider}"))
+                    .and_then(|raw| parse_list(&raw).into_iter().next())
+            } else {
+                let labels: Vec<String> = models
+                    .iter()
+                    .map(|row| format!("{} ({})", row.name, row.id))
+                    .collect();
+                let choices: Vec<&str> = labels.iter().map(String::as_str).collect();
+                select(term, "Which model should openbutler use?", &choices)
+                    .map(|index| models[index].id.clone())
             };
-            // The source's catalog-empty branch: the first list item, and
-            // an empty answer sets nothing (the pair never half-moves).
-            if let Some(model) = parse_list(&raw).into_iter().next() {
+            if let Some(model) = chosen_model {
                 term.write(&format!("\u{2714} Default: {provider} / {model}"));
                 default_pair = Some((provider, model));
             }
@@ -264,12 +425,37 @@ async fn walk_inner<T: Term, R: Reviewer>(
 
 /// Collects providers until the user declines another (the source's
 /// inner loop, setup.ts L343).
-fn collect_until_declined<T: Term>(term: &mut T, collected: &mut Vec<Collected>) -> Option<()> {
+fn collect_until_declined<T: Term>(
+    term: &mut T,
+    collected: &mut Vec<Collected>,
+    catalog: &[ProviderRow],
+) -> Option<()> {
     loop {
-        let id = ask_provider_id(term)?;
-        let url = ask_url(term)?;
+        let (id, url, npm) = if catalog.is_empty() {
+            let id = ask_provider_id(term)?;
+            let url = ask_url(term)?;
+            (id, url, None)
+        } else {
+            let labels: Vec<String> = catalog
+                .iter()
+                .map(|row| format!("{} ({}, {} models)", row.name, row.id, row.models))
+                .collect();
+            let mut choices: Vec<&str> = labels.iter().map(String::as_str).collect();
+            choices.push("Custom endpoint");
+            let chosen = select(term, "Which provider do you want to configure?", &choices)?;
+            if chosen == catalog.len() {
+                let id = ask_provider_id(term)?;
+                let url = ask_url(term)?;
+                (id, url, None)
+            } else {
+                let row = &catalog[chosen];
+                // A catalog provider ships its package, so the save needs no
+                // URL: the sidecar resolves it from npm.
+                (row.id.clone(), String::new(), row.npm.clone())
+            }
+        };
         let keys = ask_keys(term, &id)?;
-        collected.push(Collected { id, url, keys });
+        collected.push(Collected { id, url, npm, keys });
         if !confirm(term, "Add another LLM provider?")? {
             return Some(());
         }
@@ -401,11 +587,19 @@ fn build_payload(collected: &[Collected], default_pair: Option<&(String, String)
     let providers: Vec<Value> = collected
         .iter()
         .map(|entry| {
-            json!({
+            let mut row = json!({
                 "id": entry.id.as_str(),
                 "keys": entry.keys.clone(),
-                "url": entry.url.as_str(),
-            })
+            });
+            // An empty URL is absent, not an empty string: the host trims it
+            // to nothing anyway, and a catalog provider has none.
+            if !entry.url.is_empty() {
+                row["url"] = json!(entry.url.as_str());
+            }
+            if let Some(npm) = &entry.npm {
+                row["npm"] = json!(npm);
+            }
+            row
         })
         .collect();
     let mut payload = json!({ "providers": providers });
@@ -727,6 +921,101 @@ mod tests {
             vec!["alpha", "beta", "gamma", "delta"]
         );
         assert!(parse_list("  ,; ").is_empty());
+    }
+
+    /// A host with a catalog: the wizard must offer its providers and
+    /// models instead of asking for ids, and save the package, not a URL.
+    struct CatalogReviewer {
+        providers: Vec<ProviderRow>,
+        models: Vec<ModelRow>,
+        seen: RefCell<Vec<Value>>,
+    }
+
+    impl Reviewer for CatalogReviewer {
+        async fn review(&self, payload: &Value) -> Result<Vec<ScreenLine>, CliError> {
+            self.seen.borrow_mut().push(payload.clone());
+            Ok(Vec::new())
+        }
+
+        fn providers(
+            &self,
+        ) -> impl std::future::Future<Output = Result<Vec<ProviderRow>, CliError>> {
+            let rows = self.providers.clone();
+            async move { Ok(rows) }
+        }
+
+        fn models(
+            &self,
+            provider: &str,
+        ) -> impl std::future::Future<Output = Result<Vec<ModelRow>, CliError>> {
+            let rows = if provider == "mock" {
+                self.models.clone()
+            } else {
+                Vec::new()
+            };
+            async move { Ok(rows) }
+        }
+    }
+
+    #[tokio::test]
+    async fn a_catalog_host_offers_providers_and_models_and_saves_the_package() {
+        let mut term = ScriptTerm::new(
+            &[
+                Some("1"), // provider select: Mock Provider
+                Some("n"), // add another key?
+                Some("n"), // add another provider?
+                Some("1"), // default provider select: mock
+                Some("1"), // model select: Mock Large
+                Some("1"), // review: save
+            ],
+            &[Some("sk-catalog-1234")],
+        );
+        let reviewer = CatalogReviewer {
+            providers: vec![ProviderRow {
+                id: "mock".to_owned(),
+                name: "Mock Provider".to_owned(),
+                models: 2,
+                npm: Some("@ai-sdk/mock".to_owned()),
+            }],
+            models: vec![
+                ModelRow {
+                    id: "mock-large".to_owned(),
+                    name: "Mock Large".to_owned(),
+                },
+                ModelRow {
+                    id: "mock-small".to_owned(),
+                    name: "Mock Small".to_owned(),
+                },
+            ],
+            seen: RefCell::new(Vec::new()),
+        };
+        let outcome = walk(&mut term, Path::new("/data"), &reviewer)
+            .await
+            .expect("the walk returns");
+        let Outcome::Save(payload) = outcome else {
+            panic!("the scripted answers save");
+        };
+        assert!(
+            term.out.contains("Mock Provider (mock, 2 models)"),
+            "{}",
+            term.out
+        );
+        assert!(term.out.contains("Mock Large (mock-large)"), "{}", term.out);
+        assert!(
+            !term.out.contains("Catalog unavailable"),
+            "a catalog host must not claim it has none: {}",
+            term.out
+        );
+        let providers = payload["providers"].as_array().expect("providers");
+        assert_eq!(providers[0]["id"], "mock");
+        assert_eq!(providers[0]["npm"], "@ai-sdk/mock");
+        assert!(
+            providers[0].get("url").is_none(),
+            "a catalog provider saves no URL: {}",
+            providers[0]
+        );
+        assert_eq!(payload["defaultProvider"], "mock");
+        assert_eq!(payload["defaultModel"], "mock-large");
     }
 
     #[test]

@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `setup` reads the host catalog: a provider picker (name, id, model count)
+  with a custom-endpoint escape, then a model picker for the chosen provider,
+  and the header prints the host paths instead of the client paths. A
+  catalog provider saves its package (`npm`) and no URL.
+
 - Component installers (`install.sh`, `install.ps1`): select the release for
   the platform, verify it against `SHA256SUMS`, unpack into
   `~/.openbutler/bin` (`%USERPROFILE%\.openbutler\bin`), run the installed
