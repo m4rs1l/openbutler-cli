@@ -784,17 +784,46 @@ async fn daemon_start_reports_the_running_host_without_spawning() {
     );
 }
 
+/// A real executable that fails on an unexpected argument: the start and
+/// run paths only need a program that exits with a code, not a Windows
+/// tool specifically.
+fn failing_exe() -> PathBuf {
+    #[cfg(windows)]
+    {
+        std::env::var_os("WINDIR")
+            .map(|windir| PathBuf::from(windir).join("System32").join("where.exe"))
+            .expect("WINDIR is set on Windows")
+    }
+    #[cfg(not(windows))]
+    {
+        PathBuf::from("/bin/false")
+    }
+}
+
+/// A real executable that echoes its arguments, so a flag handed to the
+/// child shows up in the log the failure quotes.
+fn echoing_exe() -> PathBuf {
+    #[cfg(windows)]
+    {
+        std::env::var_os("WINDIR")
+            .map(|windir| PathBuf::from(windir).join("System32").join("findstr.exe"))
+            .expect("WINDIR is set on Windows")
+    }
+    #[cfg(not(windows))]
+    {
+        PathBuf::from("/bin/echo")
+    }
+}
+
 #[tokio::test]
 async fn daemon_start_diagnoses_a_child_that_died_before_ready() {
     let dir = unique_dir("daemon-start-dead");
-    // `where run` finds nothing, writes its own message to the log, and
-    // exits — the diagnosis must quote that log and name the exit.
-    let where_exe = std::env::var_os("WINDIR")
-        .map(|windir| PathBuf::from(windir).join("System32").join("where.exe"))
-        .expect("WINDIR is set on Windows");
-    let error = openbutler_cli::commands::daemon::start_with(&dir, &where_exe, None, false, false)
-        .await
-        .expect_err("a dead child must fail the start");
+    // The stand-in fails at once, so the diagnosis must quote the log and
+    // name the exit.
+    let error =
+        openbutler_cli::commands::daemon::start_with(&dir, &failing_exe(), None, false, false)
+            .await
+            .expect_err("a dead child must fail the start");
     let message = error.to_string();
     assert!(
         message.starts_with("The host exited before becoming ready (exit code "),
@@ -826,9 +855,7 @@ async fn daemon_start_reports_a_missing_daemon_executable() {
 /// start failure quotes, while the plain argv reads the null stdin silently.
 #[tokio::test]
 async fn daemon_start_web_passes_the_flag_to_the_child() {
-    let findstr = std::env::var_os("WINDIR")
-        .map(|windir| PathBuf::from(windir).join("System32").join("findstr.exe"))
-        .expect("WINDIR is set on Windows");
+    let findstr = echoing_exe();
 
     let with_web = unique_dir("daemon-start-web");
     let message =
@@ -1412,7 +1439,7 @@ async fn daemon_restart_tolerates_a_host_that_is_not_running() {
 async fn daemon_run_hands_back_the_child_status() {
     // A real executable that exits 1 for an unexpected argument: the point
     // is that the foreground run returns the child's code, not an error.
-    let exe = PathBuf::from("where.exe");
+    let exe = failing_exe();
     let dir = unique_dir("daemon-run");
     let code = openbutler_cli::commands::daemon::run_foreground_with(&dir, &exe, None, false)
         .await
