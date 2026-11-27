@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `openbutler approve [<n>]`: the auto-review denials the host numbered, and
+  the one-shot retry granted for one of them. The screen is the host's; the
+  client sends the number and prints the answer.
+
+- `openbutler --list-models [--filter <term>] [--limit <n>] [--provider <id>]`:
+  the source's top-level flag set. The host composes the screen
+  (`catalog.listToolModels`) and the client prints it, so the two can never
+  disagree about which model can call a tool.
+
+- Top-level `openbutler stop` and `openbutler restart`: the short
+  spellings run the same flows as `daemon stop` and `daemon restart`.
+
 - `setup` reads the host catalog: a provider picker (name, id, model count)
   with a custom-endpoint escape, then a model picker for the chosen provider,
   and the header prints the host paths instead of the client paths. A
@@ -284,6 +296,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   older pages through `session.entries-range`) closes the 32 MiB
   transcript gap on the daemon side, so the surface doc's gap list is
   empty.
+
+### Removed
+
+- `openbutler daemon token` and `openbutler daemon pair`. Remote clients
+  sign in with the admin account (`openbutler connect <host:port> <username>`)
+  and carry the session the host mints; minting and redeeming one-time
+  credentials is gone with the token store.
 
 ### Fixed
 

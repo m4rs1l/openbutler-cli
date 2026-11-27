@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 use openbutler_cli::{
-    ActionsCommand, CliError, Command, DaemonCommand, EventsCommand, SessionsCommand, TokenCommand,
+    ActionsCommand, CliError, Command, DaemonCommand, EventsCommand, SessionsCommand,
     WorkspaceCommand, execute,
 };
 use openbutler_protocol::{
@@ -974,40 +974,6 @@ async fn daemon_stop_on_a_missing_host_is_a_normal_answer() {
 }
 
 #[tokio::test]
-async fn daemon_pair_mints_a_code_and_renders_the_redeem_hint() {
-    let dir = unique_dir("daemon-pair");
-    let steps = vec![Step {
-        action: "pair.create",
-        result: json!({ "code": "a1b2c3d4e5f6", "expiresAt": 1_763_778_000_000u64 }),
-        error: None,
-        events: Vec::new(),
-    }];
-    let _server = serve_steps(&dir, steps);
-
-    let text = execute(
-        Command::Daemon {
-            command: Some(DaemonCommand::Pair),
-        },
-        &dir,
-    )
-    .await
-    .unwrap();
-    let mut lines = text.lines();
-    assert_eq!(lines.next().unwrap(), "Pairing code: a1b2c3d4e5f6");
-    let expires = lines.next().unwrap();
-    // Local wall clock (TZ-dependent value): shape-pinned as HH:MM:SS.
-    assert!(expires.starts_with("Expires:"), "{expires}");
-    let clock = expires.trim_start_matches("Expires:").trim_start();
-    assert_eq!(clock.len(), 8, "{expires}");
-    assert_eq!(clock.matches(':').count(), 2, "{expires}");
-    assert_eq!(
-        lines.next().unwrap(),
-        "Redeem it on the client within 5 minutes: openbutler connect <host:port> --code a1b2c3d4e5f6"
-    );
-    assert_eq!(lines.next(), None);
-}
-
-#[tokio::test]
 async fn daemon_start_reports_the_running_host_without_spawning() {
     let dir = unique_dir("daemon-start-active");
     let responder: Responder = Arc::new(|request| {
@@ -1684,6 +1650,39 @@ async fn daemon_restart_tolerates_a_host_that_is_not_running() {
     assert!(error.to_string().contains("Could not start"), "{error}");
 }
 
+// ------------------------------------------------ top-level stop/restart
+
+#[tokio::test]
+async fn top_level_stop_and_restart_are_the_daemon_spellings() {
+    // The short spellings the source help listed; both must exist and the
+    // stop half must be the same flow, sentence included.
+    use clap::Parser;
+    let stop = openbutler_cli::Cli::try_parse_from(["openbutler", "stop"]).unwrap();
+    assert!(matches!(stop.command, Some(Command::Stop)));
+    let restart = openbutler_cli::Cli::try_parse_from(["openbutler", "restart"]).unwrap();
+    assert!(matches!(restart.command, Some(Command::Restart)));
+
+    let dir = unique_dir("top-level-stop");
+    let steps = vec![
+        Step {
+            action: "status",
+            result: status_fixture(9101),
+            error: None,
+            events: Vec::new(),
+        },
+        Step {
+            action: "stop",
+            result: json!({ "stopping": true }),
+            error: None,
+            events: Vec::new(),
+        },
+    ];
+    let _server = serve_steps(&dir, steps);
+
+    let text = execute(Command::Stop, &dir).await.unwrap();
+    assert_eq!(text, "Background host stopped.");
+}
+
 // --------------------------------------------------------- daemon run (S3)
 
 #[tokio::test]
@@ -1707,145 +1706,76 @@ async fn daemon_run_reports_a_missing_executable() {
         .unwrap_err();
     assert!(error.to_string().contains("Could not start"), "{error}");
 }
-// ------------------------------------------------------- daemon token (S3)
-
-fn token_command(command: Option<TokenCommand>) -> Command {
-    Command::Daemon {
-        command: Some(DaemonCommand::Token { command }),
-    }
-}
+// ------------------------------------------------------ list-models (P4)
 
 #[tokio::test]
-async fn daemon_token_create_prints_the_plaintext_once() {
-    let dir = unique_dir("daemon-token-create");
-    let responder: Responder = Arc::new(|request: &DaemonRequest| match request.action.as_str() {
-        "token.create" => success(
-            request,
-            json!({ "id": "deadbeefdeadbeef", "token": "obt_example_value" }),
-        ),
-        other => panic!("unexpected action {other}"),
+async fn list_models_prints_the_hosts_lines_and_carries_the_flags() {
+    use clap::Parser;
+    // The source kept these as top-level flags (cli-main.ts L140): the
+    // parse must accept them without a subcommand.
+    let cli = openbutler_cli::Cli::try_parse_from([
+        "openbutler",
+        "--list-models",
+        "--filter",
+        "tools",
+        "--limit",
+        "5",
+        "--provider",
+        "mock",
+    ])
+    .expect("the flag set parses");
+    assert!(cli.list_models);
+    assert_eq!(cli.filter.as_deref(), Some("tools"));
+    assert_eq!(cli.limit, Some(5));
+    assert_eq!(cli.provider.as_deref(), Some("mock"));
+
+    let dir = unique_dir("list-models");
+    let seen: Arc<std::sync::Mutex<Option<Value>>> = Arc::new(std::sync::Mutex::new(None));
+    let captured = seen.clone();
+    let responder: Responder = Arc::new(move |request: &DaemonRequest| {
+        match request.action.as_str() {
+            "catalog.listToolModels" => {
+                *captured.lock().unwrap() = Some(Value::Object(request.payload.clone()));
+                success(
+                    request,
+                    json!({
+                        "lines": [
+                            { "tone": "plain", "text": "\u{2500}\u{2500} Models (1) \u{2500}\u{2500}\u{2500}" },
+                            { "tone": "plain", "text": "  PROVIDER  MODEL  NAME" },
+                            { "tone": "info", "text": "2 models match; showing 1." }
+                        ],
+                        "total": 2,
+                        "shown": 1,
+                        "limit": 1
+                    }),
+                )
+            }
+            other => panic!("unexpected action {other}"),
+        }
     });
-    let _server = serve(&dir, responder);
-
-    let text = execute(token_command(Some(TokenCommand::Create)), &dir)
-        .await
-        .unwrap();
-    let lines: Vec<&str> = text.lines().collect();
-    assert_eq!(
-        lines[0],
-        "\u{2714} Remote auth token created. The host keeps only a salted hash."
-    );
-    // ui.kv: two spaces, key padded to 22, one space, value (value byte 25).
-    assert_eq!(&lines[1][..2], "  ");
-    assert_eq!(lines[1][2..25].trim_end(), "Token id");
-    assert_eq!(&lines[1][25..], "deadbeefdeadbeef");
-    assert_eq!(lines[2][2..25].trim_end(), "Token");
-    assert_eq!(&lines[2][25..], "obt_example_value");
-    assert_eq!(
-        lines[3],
-        "\u{b7} Carry this token to the client now; it is not shown again."
-    );
-    assert_eq!(lines.len(), 4);
-}
-
-#[tokio::test]
-async fn daemon_token_list_renders_rows_or_the_empty_note() {
-    let dir = unique_dir("daemon-token-list");
-    let responder: Responder = Arc::new(|request: &DaemonRequest| match request.action.as_str() {
-        "token.list" => success(
-            request,
-            json!([
-                { "id": "0011223344556677", "createdAt": "2026-11-26T00:00:00.000Z" },
-                { "id": "8899aabbccddeeff", "createdAt": "2026-11-26T01:00:00.000Z" }
-            ]),
-        ),
-        other => panic!("unexpected action {other}"),
-    });
-    let _server = serve(&dir, responder);
-
-    let text = execute(token_command(None), &dir).await.unwrap();
-    let lines: Vec<&str> = text.lines().collect();
-    assert_eq!(lines.len(), 2, "bare `token` lists");
-    assert_eq!(&lines[0][25..], "2026-11-26T00:00:00.000Z");
-    assert_eq!(lines[0][2..25].trim_end(), "0011223344556677");
-    assert_eq!(&lines[1][25..], "2026-11-26T01:00:00.000Z");
-}
-
-#[tokio::test]
-async fn daemon_token_list_with_no_tokens_names_the_remedy() {
-    let dir = unique_dir("daemon-token-empty");
-    let responder: Responder = Arc::new(|request: &DaemonRequest| match request.action.as_str() {
-        "token.list" => success(request, json!([])),
-        other => panic!("unexpected action {other}"),
-    });
-    let _server = serve(&dir, responder);
-
-    let text = execute(token_command(Some(TokenCommand::List)), &dir)
-        .await
-        .unwrap();
-    assert_eq!(
-        text,
-        "\u{b7} No remote auth tokens. Create one with `openbutler daemon token create`."
-    );
-}
-
-#[tokio::test]
-async fn daemon_token_revoke_sends_the_id_and_prints_success() {
-    let dir = unique_dir("daemon-token-revoke");
-    let seen = Arc::new(std::sync::Mutex::new(None));
-    let responder: Responder = {
-        let seen = seen.clone();
-        Arc::new(
-            move |request: &DaemonRequest| match request.action.as_str() {
-                "token.revoke" => {
-                    *seen.lock().unwrap() = Some(Value::Object(request.payload.clone()));
-                    success(request, json!({ "revoked": true }))
-                }
-                other => panic!("unexpected action {other}"),
-            },
-        )
-    };
     let _server = serve(&dir, responder);
 
     let text = execute(
-        token_command(Some(TokenCommand::Revoke {
-            id: "deadbeefdeadbeef".to_owned(),
-        })),
+        Command::ListModels {
+            provider: Some("mock".to_owned()),
+            filter: Some("tools".to_owned()),
+            limit: Some(1),
+        },
         &dir,
     )
     .await
     .unwrap();
-    assert_eq!(text, "\u{2714} Token deadbeefdeadbeef revoked.");
+    // Byte-exact: the client applies the tones and adds nothing.
+    assert_eq!(
+        text,
+        "\u{2500}\u{2500} Models (1) \u{2500}\u{2500}\u{2500}\n  PROVIDER  MODEL  NAME\n\u{b7} 2 models match; showing 1."
+    );
     assert_eq!(
         seen.lock().unwrap().clone(),
-        Some(json!({ "tokenId": "deadbeefdeadbeef" }))
+        Some(json!({ "provider": "mock", "filter": "tools", "limit": 1 }))
     );
 }
 
-#[tokio::test]
-async fn daemon_token_revoke_surfaces_the_daemons_refusal() {
-    let dir = unique_dir("daemon-token-refusal");
-    let responder: Responder = Arc::new(|request: &DaemonRequest| DaemonResponse::Failure {
-        version: DAEMON_PROTOCOL_VERSION,
-        id: request.id.clone(),
-        ok: false,
-        error: "No token with id abc. List them with `openbutler daemon token list`.".to_owned(),
-    });
-    let _server = serve(&dir, responder);
-
-    let error = execute(
-        token_command(Some(TokenCommand::Revoke {
-            id: "abc".to_owned(),
-        })),
-        &dir,
-    )
-    .await
-    .unwrap_err();
-    assert_eq!(
-        error.to_string(),
-        "No token with id abc. List them with `openbutler daemon token list`."
-    );
-}
 // --------------------------------------------------- permissions (S3)
 
 fn permissions_command(
@@ -2707,7 +2637,7 @@ async fn sessions_prune_previews_the_host_lines() {
                             "count": 1,
                             "totalBytes": 1024,
                             "lines": [
-                                { "tone": "plain", "text": "  2020-01-02  11111111-1111-4111-8111-111111111111  1.0 KB" },
+                                { "tone": "plain", "text": "  2020-01-02  ses-111111111  1.0 KB" },
                                 { "tone": "info", "text": "1 session file(s), 1.0 KB total. Nothing was deleted; re-run with --yes to delete them." }
                             ]
                         }),
@@ -2731,10 +2661,7 @@ async fn sessions_prune_previews_the_host_lines() {
     .await
     .unwrap();
     let lines: Vec<&str> = preview.lines().collect();
-    assert_eq!(
-        lines[0],
-        "  2020-01-02  11111111-1111-4111-8111-111111111111  1.0 KB"
-    );
+    assert_eq!(lines[0], "  2020-01-02  ses-111111111  1.0 KB");
     assert_eq!(
         lines[1],
         "\u{b7} 1 session file(s), 1.0 KB total. Nothing was deleted; re-run with --yes to delete them."
@@ -2763,7 +2690,7 @@ async fn sessions_prune_applies_with_the_success_line() {
                             "deleted": 1,
                             "failed": 0,
                             "lines": [
-                                { "tone": "plain", "text": "  2020-01-02  11111111-1111-4111-8111-111111111111  1.0 KB" },
+                                { "tone": "plain", "text": "  2020-01-02  ses-111111111  1.0 KB" },
                                 { "tone": "success", "text": "Deleted 1 session file(s) (1.0 KB)." }
                             ]
                         }),
@@ -3034,4 +2961,64 @@ async fn admin_create_refuses_a_mismatch_before_anything_is_sent() {
     );
 
     let _ = std::fs::remove_dir_all(&dir);
+}
+// -------------------------------------------------------- approve (C)
+
+#[tokio::test]
+async fn approve_lists_the_hosts_dials() {
+    let dir = unique_dir("approve-list");
+    let seen: Arc<std::sync::Mutex<Option<Value>>> = Arc::new(std::sync::Mutex::new(None));
+    let captured = seen.clone();
+    let responder: Responder = Arc::new(move |request: &DaemonRequest| {
+        match request.action.as_str() {
+            "auto_review.approve" => {
+                *captured.lock().unwrap() = Some(Value::Object(request.payload.clone()));
+                success(
+                    request,
+                    json!({ "lines": [
+                        { "tone": "plain", "text": "\u{2500}\u{2500} Recent auto-review denials \u{2500}\u{2500}" },
+                        { "tone": "plain", "text": "  #  TOOL" },
+                        { "tone": "info", "text": "Approve one with `openbutler approve <n>`." }
+                    ] }),
+                )
+            }
+            other => panic!("unexpected action {other}"),
+        }
+    });
+    let _server = serve(&dir, responder);
+
+    let text = execute(Command::Approve { index: None }, &dir)
+        .await
+        .unwrap();
+    assert_eq!(
+        text,
+        "\u{2500}\u{2500} Recent auto-review denials \u{2500}\u{2500}\n  #  TOOL\n\u{b7} Approve one with `openbutler approve <n>`."
+    );
+    assert_eq!(seen.lock().unwrap().clone(), Some(json!({})));
+}
+
+#[tokio::test]
+async fn approve_sends_the_number_and_prints_the_hosts_answer() {
+    let dir = unique_dir("approve-one");
+    let seen: Arc<std::sync::Mutex<Option<Value>>> = Arc::new(std::sync::Mutex::new(None));
+    let captured = seen.clone();
+    let responder: Responder = Arc::new(move |request: &DaemonRequest| {
+        match request.action.as_str() {
+            "auto_review.approve" => {
+                *captured.lock().unwrap() = Some(Value::Object(request.payload.clone()));
+                success(
+                    request,
+                    json!({ "lines": [{ "tone": "success", "text": "Approved `execute_command` for one retry." }] }),
+                )
+            }
+            other => panic!("unexpected action {other}"),
+        }
+    });
+    let _server = serve(&dir, responder);
+
+    let text = execute(Command::Approve { index: Some(1) }, &dir)
+        .await
+        .unwrap();
+    assert_eq!(text, "\u{2714} Approved `execute_command` for one retry.");
+    assert_eq!(seen.lock().unwrap().clone(), Some(json!({ "index": 1 })));
 }

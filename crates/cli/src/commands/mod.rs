@@ -4,6 +4,7 @@
 
 pub mod about;
 pub mod admin;
+pub mod approve;
 pub mod config;
 pub mod connect;
 pub mod daemon;
@@ -11,6 +12,7 @@ pub mod keys;
 pub mod ledger;
 pub mod logs;
 pub mod mcp;
+pub mod models;
 pub mod permissions;
 pub mod run;
 pub mod schedule;

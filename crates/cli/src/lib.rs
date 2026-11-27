@@ -26,6 +26,18 @@ use clap::Parser;
 pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Command>,
+    /// List models that can call tools. `--filter`, `--limit`, `--provider`.
+    #[arg(long = "list-models")]
+    pub list_models: bool,
+    /// Substring match on `provider/model` (with `--list-models`).
+    #[arg(long, value_name = "TERM", requires = "list_models")]
+    pub filter: Option<String>,
+    /// Rows to show; 200 by default (with `--list-models`).
+    #[arg(long, value_name = "N", requires = "list_models")]
+    pub limit: Option<u32>,
+    /// One provider id (with `--list-models`).
+    #[arg(long, value_name = "ID", requires = "list_models")]
+    pub provider: Option<String>,
 }
 
 /// `openbutler events` subcommands (cli-main.ts L1585-1610).
@@ -91,10 +103,33 @@ pub enum Command {
         #[arg(value_name = "REQUEST")]
         request: String,
     },
-    /// Background-host lifecycle: status and stop today, more to come.
+    /// Background-host lifecycle: start, status, stop, restart, and foreground run.
     Daemon {
         #[command(subcommand)]
         command: Option<DaemonCommand>,
+    },
+    /// Stop the background host (same as `openbutler daemon stop`).
+    Stop,
+    /// Restart the background host (same as `openbutler daemon restart`).
+    Restart,
+    /// List recent auto-review denials; `approve <n>` retries one exactly once.
+    Approve {
+        /// The number `openbutler approve` printed.
+        #[arg(value_name = "N")]
+        index: Option<u32>,
+    },
+    /// Models a tool-using turn can run on (bare `--list-models`).
+    #[command(hide = true)]
+    ListModels {
+        /// One provider id.
+        #[arg(long, value_name = "ID")]
+        provider: Option<String>,
+        /// Substring match on `provider/model`.
+        #[arg(long, value_name = "TERM")]
+        filter: Option<String>,
+        /// Rows to show; 200 by default.
+        #[arg(long, value_name = "N")]
+        limit: Option<u32>,
     },
     /// Read the machine log's tail.
     Logs {
@@ -251,8 +286,6 @@ pub enum DaemonCommand {
     Status,
     /// Stop the background host gracefully.
     Stop,
-    /// Mint a one-time pairing code for a remote client.
-    Pair,
     /// Recycle the host: stop it, wait for the endpoint, start it again.
     Restart,
     /// Run the host in the foreground (entry points use this).
@@ -263,11 +296,6 @@ pub enum DaemonCommand {
         /// Refuse the saved listener for this run.
         #[arg(long)]
         no_listen: bool,
-    },
-    /// Remote auth tokens: mint, list, revoke (bare `token` lists).
-    Token {
-        #[command(subcommand)]
-        command: Option<TokenCommand>,
     },
     /// Start the background host (or report the running one).
     Start {
@@ -280,20 +308,6 @@ pub enum DaemonCommand {
         /// Also serve the browser UI (the pair URL lands in `openbutler web`).
         #[arg(long)]
         web: bool,
-    },
-}
-
-/// `openbutler daemon token` subcommands (cli-main.ts L1750-1780).
-#[derive(Debug, Clone, clap::Subcommand)]
-pub enum TokenCommand {
-    /// Mint a token; the plaintext is printed once and never stored.
-    Create,
-    /// List minted tokens (id and creation time only).
-    List,
-    /// Revoke one token by id.
-    Revoke {
-        /// The token id `token list` printed.
-        id: String,
     },
 }
 
@@ -310,20 +324,26 @@ pub async fn execute(command: Command, data_dir: &std::path::Path) -> Result<Str
         Command::Daemon { command } => match command.unwrap_or(DaemonCommand::Status) {
             DaemonCommand::Status => commands::daemon::status(data_dir).await,
             DaemonCommand::Stop => commands::daemon::stop(data_dir).await,
-            DaemonCommand::Pair => commands::daemon::pair(data_dir).await,
             DaemonCommand::Restart => commands::daemon::restart(data_dir).await,
             DaemonCommand::Run { listen, no_listen } => {
                 commands::daemon::run_foreground(data_dir, listen, no_listen)
                     .await
                     .map(|_| String::new())
             }
-            DaemonCommand::Token { command } => commands::daemon::token(data_dir, command).await,
             DaemonCommand::Start {
                 listen,
                 no_listen,
                 web,
             } => commands::daemon::start(data_dir, listen, no_listen, web).await,
         },
+        Command::Stop => commands::daemon::stop(data_dir).await,
+        Command::Approve { index } => commands::approve::run(data_dir, index).await,
+        Command::ListModels {
+            provider,
+            filter,
+            limit,
+        } => commands::models::list(data_dir, provider, filter, limit).await,
+        Command::Restart => commands::daemon::restart(data_dir).await,
         Command::Logs {
             lines,
             file,
@@ -455,7 +475,20 @@ pub enum CliError {
 /// 0 success, 1 command/daemon failure, 2 usage (clap's own exit).
 pub fn main_entry() -> std::process::ExitCode {
     let cli = Cli::parse();
-    let Some(command) = cli.command else {
+    let command = if cli.list_models {
+        if cli.command.is_some() {
+            eprintln!("openbutler: --list-models does not combine with a command.");
+            return std::process::ExitCode::from(2);
+        }
+        Some(Command::ListModels {
+            provider: cli.provider,
+            filter: cli.filter,
+            limit: cli.limit,
+        })
+    } else {
+        cli.command
+    };
+    let Some(command) = command else {
         // Unknown or missing verbs never become a prompt: usage only.
         let mut help = Vec::new();
         let mut command = <Cli as clap::CommandFactory>::command();

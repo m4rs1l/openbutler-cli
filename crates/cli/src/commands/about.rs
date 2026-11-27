@@ -3,8 +3,10 @@
 //!
 //! The screen is the source's `runAbout` layout with one added row: this
 //! build has two binaries, so `Host` names the daemon that answered
-//! (version + pid). Both binaries version together, so `Version` is the
-//! host's too — the client cannot claim a version the host does not run.
+//! (version + pid). The two binaries version independently: the screen
+//! describes the host, while `openbutler --version` describes the client.
+//! Compatibility is decided by the protocol version on the wire, never by
+//! comparing the two product versions.
 
 use std::path::Path;
 
