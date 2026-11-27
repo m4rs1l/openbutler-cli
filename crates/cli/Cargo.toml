@@ -16,7 +16,7 @@ workspace = true
 chrono = "0.4.45"
 clap = { version = "4.6.9", features = ["derive"] }
 crossterm = "0.29.0"
-openbutler-protocol = { git = "https://github.com/m4rs1l/openbutler-protocol", rev = "72c0002", version = "0.0.1" }
+openbutler-protocol = { git = "https://github.com/m4rs1l/openbutler-protocol", rev = "4cc86b1", version = "0.0.1" }
 ratatui = "0.30.2"
 rpassword = "7.5.5"
 serde = { version = "1.0.229", features = ["derive"] }
