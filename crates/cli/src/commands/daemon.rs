@@ -686,7 +686,7 @@ fn resolve_daemon_exe() -> Result<std::path::PathBuf, CliError> {
     if let Ok(current) = std::env::current_exe()
         && let Some(dir) = current.parent()
     {
-        let name = std::ffi::OsString::from("openbutler-daemon");
+        let name = std::ffi::OsString::from("openbutlerd");
         #[cfg(windows)]
         let name = {
             let mut name = name;
@@ -787,7 +787,7 @@ mod tests {
         use std::ffi::OsStr;
 
         let dir = std::path::Path::new("C:\\fixture\\data");
-        let exe = std::path::Path::new("openbutler-daemon.exe");
+        let exe = std::path::Path::new("openbutlerd.exe");
         let command = super::background_command(dir, exe, Some("127.0.0.1:7777"), false, true);
         let envs: Vec<(&OsStr, Option<&OsStr>)> = command.get_envs().collect();
         assert!(

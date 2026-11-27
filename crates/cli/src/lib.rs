@@ -20,7 +20,7 @@ use clap::Parser;
 #[derive(Debug, Parser)]
 #[command(
     name = "openbutler",
-    version,
+    version = concat!(env!("CARGO_PKG_VERSION"), " (cli)"),
     about = "Command-line client for the OpenButler daemon"
 )]
 pub struct Cli {

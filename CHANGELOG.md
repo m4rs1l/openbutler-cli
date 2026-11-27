@@ -21,14 +21,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   presents the stored session as the connection's first frame. `daemon
   start|stop|restart|run` keeps dialing the local endpoint, because those verbs
   are about this machine's process.
-
-### Changed
-
-- The client resolves a connection in one place: a stored backend first, the
-  local endpoint otherwise, with no silent fallback between them — a stored
-  backend that fails to authenticate is an error, never a quiet question to the
-  local socket.
-
 - `daemon start --web` passes `--web` to the spawned host, which then
   serves the browser UI; `openbutler web` prints its pair URL. A host that
   is already running is reported unchanged.
@@ -229,6 +221,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The client resolves a connection in one place: a stored backend first, the
+  local endpoint otherwise, with no silent fallback between them — a stored
+  backend that fails to authenticate is an error, never a quiet question to the
+  local socket.
+- `openbutler --version` prints `openbutler <version> (cli)`, and the run
+  lines in the README keep one command name per install.
+- `daemon start` looks for the sibling `openbutlerd` (+ `.exe` on Windows);
+  the package and the data directory keep their names, so existing data is
+  untouched.
 - `skills` prints the host table or its empty screen; the CLI no longer
   lays it out.
 - `status` and `sessions` print the host's screens (`DaemonStatus.lines`,
