@@ -2155,16 +2155,15 @@ async fn skills_renders_the_host_table() {
     let dir = unique_dir("skills-table");
     let responder: Responder = Arc::new(|request| {
         assert_eq!(request.action, "skills.list");
-        assert_eq!(request.payload["workspace"], "C:\\work\\proj");
+        assert!(request.payload.get("workspace").is_none());
         success(
             request,
             json!({
-                "workspace": "C:\\work\\proj",
                 "skills": [
                     {
-                        "name": "alpha", "scope": "workspace",
-                        "description": "A workspace skill.",
-                        "filePath": "C:\\work\\proj\\.agents\\skills\\alpha\\SKILL.md"
+                        "name": "alpha", "scope": "global",
+                        "description": "A user skill.",
+                        "filePath": "C:\\Users\\me\\.agents\\skills\\alpha\\SKILL.md"
                     },
                     {
                         "name": "beta", "scope": "global",
@@ -2176,7 +2175,7 @@ async fn skills_renders_the_host_table() {
                 "lines": [
                     { "tone": "plain", "text": "  NAME   SCOPE      DESCRIPTION        SKILL FILE" },
                     { "tone": "plain", "text": "  \u{2500}\u{2500}\u{2500}\u{2500}  \u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}  \u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}  \u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}" },
-                    { "tone": "plain", "text": "  alpha  workspace  A workspace skill.  C:\\work\\proj\\.agents\\skills\\alpha\\SKILL.md" },
+                    { "tone": "plain", "text": "  alpha  global     A user skill.       C:\\Users\\me\\.agents\\skills\\alpha\\SKILL.md" },
                     { "tone": "plain", "text": "  beta   global     A user skill.       C:\\Users\\me\\.agents\\skills\\beta\\SKILL.md" }
                 ]
             }),
@@ -2184,20 +2183,13 @@ async fn skills_renders_the_host_table() {
     });
     let _server = serve(&dir, responder);
 
-    let text = execute(
-        Command::Skills {
-            workspace: Some("C:\\work\\proj".to_owned()),
-        },
-        &dir,
-    )
-    .await
-    .unwrap();
+    let text = execute(Command::Skills, &dir).await.unwrap();
     let lines: Vec<&str> = text.lines().collect();
     assert!(lines[0].starts_with("  NAME"), "{:?}", lines[0]);
     assert!(lines[0].contains("SCOPE") && lines[0].contains("SKILL FILE"));
     // The rule line, then the rows in the host's order.
     assert!(lines[1].contains('\u{2500}'), "{:?}", lines[1]);
-    assert!(lines[2].contains("alpha") && lines[2].contains("workspace"));
+    assert!(lines[2].contains("alpha") && lines[2].contains("global"));
     assert!(lines[3].contains("beta") && lines[3].contains("global"));
 }
 
@@ -2209,7 +2201,6 @@ async fn skills_without_a_skill_names_the_roots() {
         success(
             request,
             json!({
-                "workspace": "C:\\data\\custodian",
                 "skills": [],
                 "roots": [
                     { "scope": "builtin", "path": "C:\\app\\skills" },
@@ -2226,9 +2217,7 @@ async fn skills_without_a_skill_names_the_roots() {
     });
     let _server = serve(&dir, responder);
 
-    let text = execute(Command::Skills { workspace: None }, &dir)
-        .await
-        .unwrap();
+    let text = execute(Command::Skills, &dir).await.unwrap();
     let lines: Vec<&str> = text.lines().collect();
     assert_eq!(lines[0], "\u{b7} No Agent Skills found.");
     assert_eq!(

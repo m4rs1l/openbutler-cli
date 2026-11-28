@@ -265,6 +265,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `openbutler skills` no longer takes `--workspace`: skills are global, so
+  there is no directory to scan on request and no default to fall back to.
 - `run` prints the answer, not a banner: the model/provider header and the
   "your request will be sent to ..." line are gone. Reasoning continuations
   are labelled by the host and are never printed into the answer.

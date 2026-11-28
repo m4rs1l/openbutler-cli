@@ -195,12 +195,8 @@ pub enum Command {
     /// Version, shell, runtime and the configuration paths.
     About,
 
-    /// List the Agent Skills this machine offers.
-    Skills {
-        /// Scan this directory instead of the custodian scope.
-        #[arg(long, value_name = "PATH")]
-        workspace: Option<String>,
-    },
+    /// List the global Agent Skills this machine offers.
+    Skills,
     /// List, log and inspect scheduled wakeups.
     Schedule {
         /// list | log <id> | capabilities (bare: list).
@@ -392,7 +388,7 @@ pub async fn execute(command: Command, data_dir: &std::path::Path) -> Result<Str
         Command::Config => commands::config::run(data_dir).await,
         Command::About => commands::about::run(data_dir).await,
 
-        Command::Skills { workspace } => commands::skills::run(data_dir, workspace).await,
+        Command::Skills => commands::skills::run(data_dir).await,
         Command::Keys { command } => {
             let request = match command {
                 None | Some(KeysCommand::List) => commands::keys::KeysRequest::List,
