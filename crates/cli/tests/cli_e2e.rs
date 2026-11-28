@@ -2901,3 +2901,105 @@ async fn approve_sends_the_number_and_prints_the_hosts_answer() {
     assert_eq!(text, "\u{2714} Approved `execute_command` for one retry.");
     assert_eq!(seen.lock().unwrap().clone(), Some(json!({ "index": 1 })));
 }
+
+/// A search prints exactly the screen the host composed, and sends the
+/// keywords and the paging knobs it was given - nothing else.
+#[tokio::test]
+async fn sessions_search_prints_the_host_screen() {
+    let dir = unique_dir("sessions-search");
+    let responder: Responder = Arc::new(|request| {
+        assert_eq!(request.action, "session.search");
+        assert_eq!(request.payload["query"], "black mirror");
+        assert_eq!(request.payload["limit"], 5);
+        assert_eq!(request.payload["includeOutputs"], true);
+        success(
+            request,
+            json!({
+                "matches": [],
+                "total": 0,
+                "terms": ["black", "mirror"],
+                "dropped": [],
+                "truncated": false,
+                "lines": [
+                    { "tone": "plain", "text": "Search \"black mirror\" · 1 match · phrase · 44 ms" },
+                    { "tone": "plain", "text": "ses-2JEDC57SF  1246  user       …[black] [mirror]'un kalan sezonları…" },
+                    { "tone": "info", "text": "searched black, mirror" }
+                ]
+            }),
+        )
+    });
+    let _server = serve(&dir, responder);
+
+    let text = execute(
+        Command::Sessions {
+            command: Some(SessionsCommand::Search {
+                query: "black mirror".to_owned(),
+                limit: Some(5),
+                offset: None,
+                include_outputs: true,
+                json: false,
+            }),
+        },
+        &dir,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        text,
+        "Search \"black mirror\" · 1 match · phrase · 44 ms\n\
+         ses-2JEDC57SF  1246  user       …[black] [mirror]'un kalan sezonları…\n\
+         \u{00b7} searched black, mirror"
+    );
+}
+
+/// `--json` is for a caller that wants the data: the answer's fields travel
+/// unchanged, and the screen is not printed in their place.
+#[tokio::test]
+async fn sessions_search_json_prints_the_raw_answer() {
+    let dir = unique_dir("sessions-search-json");
+    let responder: Responder = Arc::new(|request| {
+        assert_eq!(request.action, "session.search");
+        assert!(request.payload.get("limit").is_none());
+        success(
+            request,
+            json!({
+                "matches": [{
+                    "sessionId": "ses-2JEDC57SF",
+                    "entry": 1246,
+                    "kind": "user",
+                    "snippet": "…[black] [mirror]…",
+                    "score": 8.31,
+                    "tier": "phrase",
+                    "title": "Black Mirror",
+                    "updatedAt": "2026-11-20T18:04:11.512Z"
+                }],
+                "total": 1,
+                "terms": ["black", "mirror"],
+                "dropped": ["kaç"],
+                "truncated": false,
+                "lines": [{ "tone": "plain", "text": "Search …" }]
+            }),
+        )
+    });
+    let _server = serve(&dir, responder);
+
+    let text = execute(
+        Command::Sessions {
+            command: Some(SessionsCommand::Search {
+                query: "black mirror".to_owned(),
+                limit: None,
+                offset: None,
+                include_outputs: false,
+                json: true,
+            }),
+        },
+        &dir,
+    )
+    .await
+    .unwrap();
+    let value: Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(value["matches"][0]["sessionId"], "ses-2JEDC57SF");
+    assert_eq!(value["matches"][0]["tier"], "phrase");
+    assert_eq!(value["dropped"], json!(["kaç"]));
+    assert!(text.contains("\"snippet\""), "{text}");
+}

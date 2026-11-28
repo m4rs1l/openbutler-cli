@@ -73,6 +73,23 @@ pub enum SessionsCommand {
         #[arg(long)]
         yes: bool,
     },
+    /// Search saved transcripts for keywords.
+    Search {
+        /// Two to four distinctive keywords, not a sentence.
+        query: String,
+        /// Maximum matches to return.
+        #[arg(long)]
+        limit: Option<i64>,
+        /// Matches to skip, for paging.
+        #[arg(long)]
+        offset: Option<i64>,
+        /// Also search text that came from tool output.
+        #[arg(long)]
+        include_outputs: bool,
+        /// Print the raw answer instead of the screen.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 /// `openbutler actions` subcommands.

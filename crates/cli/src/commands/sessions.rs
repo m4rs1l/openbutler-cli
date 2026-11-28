@@ -9,7 +9,7 @@
 
 use std::path::Path;
 
-use openbutler_protocol::SessionListAnswer;
+use openbutler_protocol::{SessionListAnswer, SessionSearchAnswer};
 use serde::Deserialize;
 use serde_json::json;
 
@@ -21,6 +21,13 @@ pub async fn run(data_dir: &Path, command: Option<SessionsCommand>) -> Result<St
     match command {
         None => list(data_dir).await,
         Some(SessionsCommand::Prune { older_than, yes }) => prune(data_dir, &older_than, yes).await,
+        Some(SessionsCommand::Search {
+            query,
+            limit,
+            offset,
+            include_outputs,
+            json,
+        }) => search(data_dir, &query, limit, offset, include_outputs, json).await,
     }
 }
 
@@ -32,6 +39,43 @@ async fn list(data_dir: &Path) -> Result<String, CliError> {
             action: "session.list",
             source,
         })?;
+    Ok(crate::ui::screen(&answer.lines))
+}
+
+/// Asks the host to search the derived index and prints its screen, or the
+/// raw answer with `--json`; the CLI decides neither the rows nor the words.
+async fn search(
+    data_dir: &Path,
+    query: &str,
+    limit: Option<i64>,
+    offset: Option<i64>,
+    include_outputs: bool,
+    raw: bool,
+) -> Result<String, CliError> {
+    let mut fields: Vec<(&str, serde_json::Value)> = vec![("query", json!(query))];
+    if let Some(value) = limit {
+        fields.push(("limit", json!(value)));
+    }
+    if let Some(value) = offset {
+        fields.push(("offset", json!(value)));
+    }
+    if include_outputs {
+        fields.push(("includeOutputs", json!(true)));
+    }
+    let mut client = crate::client::Client::connect(data_dir).await?;
+    let result =
+        crate::commands::daemon::call_fields(&mut client, "session.search", fields).await?;
+    let answer: SessionSearchAnswer =
+        serde_json::from_value(result).map_err(|source| CliError::Decode {
+            action: "session.search",
+            source,
+        })?;
+    if raw {
+        return serde_json::to_string_pretty(&answer).map_err(|source| CliError::Decode {
+            action: "session.search",
+            source,
+        });
+    }
     Ok(crate::ui::screen(&answer.lines))
 }
 

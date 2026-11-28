@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `openbutler sessions search "<keywords>"`: asks the host to search the
+  derived index and prints the screen the host composed, or the raw answer
+  with `--json`. `--limit`, `--offset` and `--include-outputs` map straight
+  to the request.
+
 - `openbutler uninstall [--purge] [--dry-run] [--force]`: removes the program
   the installer laid down, its login entry and its PATH line. The data
   directory is kept unless `--purge`; a directory without the installer marker
