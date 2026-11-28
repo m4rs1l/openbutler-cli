@@ -270,6 +270,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The client refuses to send an action the protocol's catalog does not
+  declare. A typo now fails at the call site with the name in the sentence,
+  instead of costing a dial and an "unknown action" answer from the host.
+  The protocol pin moves to the revision that declares the catalog.
 - `openbutler skills` no longer takes `--workspace`: skills are global, so
   there is no directory to scan on request and no default to fall back to.
 - `run` prints the answer, not a banner: the model/provider header and the

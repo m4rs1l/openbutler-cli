@@ -323,6 +323,7 @@ pub(crate) async fn call_fields(
     action: &str,
     fields: Vec<(&str, serde_json::Value)>,
 ) -> Result<serde_json::Value, CliError> {
+    require_declared(action)?;
     let mut request =
         openbutler_protocol::DaemonRequest::new(uuid::Uuid::new_v4().to_string(), action);
     for (key, value) in fields {
@@ -332,6 +333,19 @@ pub(crate) async fn call_fields(
         openbutler_protocol::DaemonResponse::Success { result, .. } => Ok(result),
         openbutler_protocol::DaemonResponse::Failure { error, .. } => Err(CliError::Answer(error)),
     }
+}
+
+/// Refuses a name the protocol's catalog does not declare. The host would
+/// answer "unknown action" too, but only after a dial and a frame; a client
+/// typo should not cost a round trip, and a name that is not in the contract
+/// is a client bug rather than a host condition.
+fn require_declared(action: &str) -> Result<(), CliError> {
+    if openbutler_protocol::is_known(action) {
+        return Ok(());
+    }
+    Err(CliError::Answer(format!(
+        "The client asked for an action the contract does not declare: {action}"
+    )))
 }
 
 fn decode_status(result: serde_json::Value) -> Result<openbutler_protocol::DaemonStatus, CliError> {
@@ -721,6 +735,27 @@ mod tests {
         assert_eq!(
             render_restarted(4242),
             "Background host restarted (pid 4242).\nOpen sessions reconnect automatically."
+        );
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod catalog_tests {
+    use super::require_declared;
+
+    #[test]
+    fn a_declared_action_is_let_through() {
+        require_declared("session.search").expect("session.search is in the contract");
+        require_declared("status").expect("status is in the contract");
+    }
+
+    #[test]
+    fn a_typo_is_refused_before_the_dial() {
+        let error = require_declared("session.serach").expect_err("a typo must not go out");
+        assert!(
+            error.to_string().contains("the contract does not declare"),
+            "the sentence must name the cause: {error}"
         );
     }
 }
