@@ -924,7 +924,7 @@ dependencies = [
 [[package]]
 name = "openbutler-protocol"
 version = "0.0.1"
-source = "git+https://github.com/m4rs1l/openbutler-protocol?rev=0246fd9#0246fd9558a5f5332b38cd59cbe148f2005945f3"
+source = "git+https://github.com/m4rs1l/openbutler-protocol?rev=5b4df51#5b4df51ef0cdcfcea929b71111987e22f2750d50"
 dependencies = [
  "serde",
  "serde_json",
