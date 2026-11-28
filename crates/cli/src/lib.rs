@@ -284,6 +284,10 @@ pub enum AdminCommand {
     Create {
         /// The account username.
         username: String,
+        /// Read the password from the first line of standard input instead of
+        /// prompting twice, so a script can provision the account without a tty.
+        #[arg(long)]
+        password_stdin: bool,
     },
 }
 
@@ -435,10 +439,20 @@ pub async fn execute(command: Command, data_dir: &std::path::Path) -> Result<Str
             .await
         }
         Command::Admin {
-            command: AdminCommand::Create { username },
+            command:
+                AdminCommand::Create {
+                    username,
+                    password_stdin,
+                },
         } => {
-            commands::admin::create(data_dir, &username, &mut commands::connect::TerminalPrompt)
-                .await
+            if password_stdin {
+                let stdin = std::io::stdin();
+                let mut source = stdin.lock();
+                commands::admin::create_from_stdin(data_dir, &username, &mut source).await
+            } else {
+                commands::admin::create(data_dir, &username, &mut commands::connect::TerminalPrompt)
+                    .await
+            }
         }
         // The buffered path (tests and callers without a terminal); the
         // binary streams a run straight to the real stdio.
@@ -583,7 +597,7 @@ pub fn main_entry() -> std::process::ExitCode {
 
 #[cfg(test)]
 mod install_tests {
-    use super::{Cli, Command, DaemonCommand};
+    use super::{AdminCommand, Cli, Command, DaemonCommand};
     use clap::Parser;
 
     /// The workspace forbids expect, tests included: a failed parse panics
@@ -592,6 +606,22 @@ mod install_tests {
         match Cli::try_parse_from(arguments) {
             Ok(cli) => cli,
             Err(error) => panic!("parse failed: {error}"),
+        }
+    }
+
+    #[test]
+    fn admin_create_reads_the_password_from_stdin_when_asked() {
+        match parse(&["openbutler", "admin", "create", "owner"]).command {
+            Some(Command::Admin {
+                command: AdminCommand::Create { password_stdin, .. },
+            }) => assert!(!password_stdin, "the default is still the terminal prompt"),
+            _ => panic!("expected admin create"),
+        }
+        match parse(&["openbutler", "admin", "create", "owner", "--password-stdin"]).command {
+            Some(Command::Admin {
+                command: AdminCommand::Create { password_stdin, .. },
+            }) => assert!(password_stdin, "the flag turns the prompt off"),
+            _ => panic!("expected admin create"),
         }
     }
 

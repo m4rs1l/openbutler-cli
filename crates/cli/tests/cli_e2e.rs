@@ -2795,6 +2795,62 @@ async fn admin_create_refuses_a_mismatch_before_anything_is_sent() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[tokio::test]
+async fn admin_create_reads_one_line_from_stdin_and_keeps_inner_spaces() {
+    let dir = unique_dir("admin-stdin");
+    let responder: Responder = Arc::new(|request| {
+        assert_eq!(request.action, "admin.create");
+        assert_eq!(
+            request.get("username").and_then(Value::as_str),
+            Some("owner")
+        );
+        assert_eq!(
+            request.get("password").and_then(Value::as_str),
+            Some("  correct horse battery  "),
+            "only the line ending is trimmed, so a password may keep its spaces"
+        );
+        DaemonResponse::Success {
+            version: DAEMON_PROTOCOL_VERSION,
+            id: request.id.clone(),
+            ok: true,
+            result: json!({
+                "username": "owner",
+                "lines": [{ "tone": "success", "text": "Admin account owner created." }]
+            }),
+        }
+    });
+    let _server = serve(&dir, responder);
+    let mut source = std::io::Cursor::new("  correct horse battery  \r\n");
+    let text = openbutler_cli::commands::admin::create_from_stdin(&dir, "owner", &mut source)
+        .await
+        .expect("create succeeds");
+    assert_eq!(
+        text,
+        openbutler_cli::ui::success("Admin account owner created."),
+        "the client prints the host's sentence and adds nothing"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test]
+async fn admin_create_refuses_empty_stdin_before_anything_is_sent() {
+    let dir = unique_dir("admin-stdin-empty");
+    // No listener: a refusal must land before any dial, so the missing socket
+    // would surface as a connect error if the order were wrong.
+    let mut source = std::io::Cursor::new("\r\n");
+    let error = openbutler_cli::commands::admin::create_from_stdin(&dir, "owner", &mut source)
+        .await
+        .expect_err("an empty line is not a password");
+    assert_eq!(
+        error.to_string(),
+        openbutler_cli::commands::admin::NO_STDIN_PASSWORD
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 // -------------------------------------------------------- approve (C)
 
 #[tokio::test]
