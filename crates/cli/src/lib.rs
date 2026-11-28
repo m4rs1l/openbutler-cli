@@ -197,12 +197,7 @@ pub enum Command {
 
     /// List the global Agent Skills this machine offers.
     Skills,
-    /// List, log and inspect scheduled wakeups.
-    Schedule {
-        /// list | log <id> | capabilities (bare: list).
-        #[arg(trailing_var_arg = true)]
-        words: Vec<String>,
-    },
+
     /// The browser surface this host serves.
     Web,
     /// The global MCP server manager.
@@ -382,7 +377,7 @@ pub async fn execute(command: Command, data_dir: &std::path::Path) -> Result<Str
         // buffered path the guard fires first, so a non-terminal caller
         // gets the refusal sentence and no prompts.
         Command::Setup => commands::setup::run(data_dir).await.map(|()| String::new()),
-        Command::Schedule { words } => commands::schedule::run(data_dir, &words).await,
+
         Command::Web => commands::web::run(data_dir).await,
         Command::Mcp { action } => commands::mcp::run(data_dir, action).await,
         Command::Config => commands::config::run(data_dir).await,

@@ -2767,40 +2767,6 @@ async fn mcp_refuses_an_unknown_subcommand() {
     assert_eq!(error.to_string(), "Usage: openbutler mcp [list|add|remove]");
 }
 
-#[tokio::test]
-async fn schedule_add_reads_the_file_and_prints_the_hosts_line() {
-    let dir = unique_dir("schedule-add");
-    let file = dir.join("schedule.json");
-    std::fs::write(
-        &file,
-        r#"{"name":"morning","trigger":{"adapter":"daily","options":{"at":"09:00"}},"instruction":"hi","workspaceRoot":"."}"#,
-    )
-    .unwrap();
-    let responder: Responder = Arc::new(|request| {
-        assert_eq!(request.action, "schedule.manage");
-        assert_eq!(request.payload["input"]["action"], "add");
-        assert_eq!(request.payload["input"]["schedule"]["name"], "morning");
-        success(
-            request,
-            json!({
-                "lines": [{
-                    "tone": "success",
-                    "text": "Schedule morning saved (every day at 09:00). Timers are live."
-                }]
-            }),
-        )
-    });
-    let _server = serve(&dir, responder);
-    let text = execute(
-        Command::Schedule {
-            words: vec!["add".to_owned(), file.display().to_string()],
-        },
-        &dir,
-    )
-    .await
-    .unwrap();
-    assert!(text.contains("Timers are live."), "{text:?}");
-}
 // --- admin create ------------------------------------------------------------
 
 /// Answers from a script and claims a terminal, so the masked prompts stay

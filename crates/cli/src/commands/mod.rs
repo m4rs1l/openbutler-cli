@@ -15,7 +15,7 @@ pub mod mcp;
 pub mod models;
 pub mod permissions;
 pub mod run;
-pub mod schedule;
+
 pub mod sessions;
 pub mod setup;
 pub mod skills;
