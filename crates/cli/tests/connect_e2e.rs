@@ -11,12 +11,13 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
+use futures_util::{SinkExt, StreamExt};
 use openbutler_cli::commands::connect::{self, SecretPrompt};
 use openbutler_cli::remote::{self, StoredSession};
 use openbutler_cli::{CliError, Command, execute};
 use openbutler_protocol::{BackendTarget, DaemonResponse, FrameDecoder, MAX_DAEMON_FRAME_BYTES};
 use serde_json::{Value, json};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio_tungstenite::tungstenite::Message;
 
 const SESSION_TOKEN: &str = "obt_test_session";
 
@@ -43,19 +44,20 @@ async fn serve(connections: usize) -> (SocketAddr, Seen) {
     let recorded = Arc::clone(&seen);
     tokio::spawn(async move {
         for _ in 0..connections {
-            let Ok((mut stream, _)) = listener.accept().await else {
+            let Ok((stream, _)) = listener.accept().await else {
                 return;
             };
             let seen = Arc::clone(&recorded);
             tokio::spawn(async move {
-                let mut decoder = FrameDecoder::new(MAX_DAEMON_FRAME_BYTES);
-                let mut buffer = vec![0u8; 4096];
-                loop {
-                    let read = stream.read(&mut buffer).await.unwrap_or(0);
-                    if read == 0 {
-                        return;
-                    }
-                    for frame in decoder.append(&buffer[..read]).unwrap() {
+                let mut socket = tokio_tungstenite::accept_async(stream).await.unwrap();
+                while let Some(message) = socket.next().await {
+                    let payload = match message.unwrap() {
+                        Message::Text(text) => text.as_str().as_bytes().to_vec(),
+                        Message::Binary(bytes) => bytes.to_vec(),
+                        _ => continue,
+                    };
+                    let mut decoder = FrameDecoder::new(MAX_DAEMON_FRAME_BYTES);
+                    for frame in decoder.append(&payload).unwrap() {
                         let value: Value = serde_json::from_slice(&frame).unwrap();
                         seen.lock().unwrap().push(value.clone());
                         let id = value["id"].as_str().unwrap_or_default().to_owned();
@@ -97,7 +99,10 @@ async fn serve(connections: usize) -> (SocketAddr, Seen) {
                         };
                         let mut bytes = serde_json::to_vec(&response).unwrap();
                         bytes.push(b'\n');
-                        stream.write_all(&bytes).await.unwrap();
+                        socket
+                            .send(Message::Text(String::from_utf8(bytes).unwrap().into()))
+                            .await
+                            .unwrap();
                     }
                 }
             });

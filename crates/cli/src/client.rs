@@ -2,7 +2,8 @@
 //!
 //! Frames, envelope shapes, and every validation rule come from
 //! `openbutler-protocol`; this module only owns transport (dialing the
-//! derived endpoint, or the stored backend's TCP address, and moving bytes)
+//! derived endpoint, or upgrading to the stored backend over the WebSocket, and
+//! moving bytes)
 //! and the correlation check the envelope does not perform on the client side
 //! (response id echoes the request id).
 //!
@@ -14,6 +15,7 @@
 
 use std::path::Path;
 
+use futures_util::{SinkExt, StreamExt};
 use openbutler_protocol::BackendTarget;
 use openbutler_protocol::auth::LoginSuccess;
 use openbutler_protocol::constants::CLIENT_CONNECT_TIMEOUT_MS;
@@ -24,6 +26,8 @@ use openbutler_protocol::{
 };
 use serde_json::Value;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 
 /// Transport failures with the context a human needs to act.
 #[derive(Debug, thiserror::Error)]
@@ -71,7 +75,54 @@ pub enum ClientError {
 /// One stream per transport; both speak the same framed bytes.
 enum Transport {
     Local(Stream),
-    Remote(tokio::net::TcpStream),
+    Remote(Box<RemoteSocket>),
+}
+
+/// A WebSocket seen as the byte stream the local door carries: one message
+/// per frame, newline included.
+struct RemoteSocket {
+    ws: WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>,
+    pending: Vec<u8>,
+    at: usize,
+}
+
+impl RemoteSocket {
+    async fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        loop {
+            if self.at < self.pending.len() {
+                let take = (self.pending.len() - self.at).min(buffer.len());
+                buffer[..take].copy_from_slice(&self.pending[self.at..self.at + take]);
+                self.at += take;
+                if self.at == self.pending.len() {
+                    self.pending.clear();
+                    self.at = 0;
+                }
+                return Ok(take);
+            }
+            match self.ws.next().await {
+                None => return Ok(0),
+                Some(Err(error)) => return Err(std::io::Error::other(error.to_string())),
+                Some(Ok(Message::Binary(bytes))) => {
+                    self.pending = bytes.to_vec();
+                    self.at = 0;
+                }
+                Some(Ok(Message::Text(text))) => {
+                    self.pending = text.as_str().as_bytes().to_vec();
+                    self.at = 0;
+                }
+                Some(Ok(Message::Close(_))) => return Ok(0),
+                Some(Ok(_)) => {}
+            }
+        }
+    }
+
+    async fn write_all(&mut self, bytes: &[u8]) -> std::io::Result<()> {
+        let frame = String::from_utf8_lossy(bytes).into_owned();
+        self.ws
+            .send(Message::Text(frame.into()))
+            .await
+            .map_err(|error| std::io::Error::other(error.to_string()))
+    }
 }
 
 impl Transport {
@@ -143,13 +194,13 @@ impl Client {
         ))
     }
 
-    /// Dials a TCP address (`host:port`) without authenticating. The caller
-    /// sends `login` or `auth` next; nothing is dispatched before that.
+    /// Upgrades to a remote host (`host:port`) without authenticating. The
+    /// caller sends `login` or `auth` next; nothing is dispatched before that.
     pub async fn dial_remote(address: &str, data_dir: &Path) -> Result<Self, ClientError> {
-        let connect = tokio::net::TcpStream::connect(address);
-        let stream = tokio::time::timeout(
+        let url = format!("ws://{address}/ws");
+        let upgrade = tokio::time::timeout(
             std::time::Duration::from_millis(CLIENT_CONNECT_TIMEOUT_MS),
-            connect,
+            connect_async(&url),
         )
         .await
         .map_err(|_| ClientError::Unreachable {
@@ -157,13 +208,17 @@ impl Client {
             data_dir: data_dir.display().to_string(),
             source: std::io::Error::new(std::io::ErrorKind::TimedOut, "the connection timed out"),
         })?
-        .map_err(|source| ClientError::Unreachable {
+        .map_err(|error| ClientError::Unreachable {
             endpoint: address.to_owned(),
             data_dir: data_dir.display().to_string(),
-            source,
+            source: std::io::Error::other(error.to_string()),
         })?;
         Ok(Self::with_transport(
-            Transport::Remote(stream),
+            Transport::Remote(Box::new(RemoteSocket {
+                ws: upgrade.0,
+                pending: Vec::new(),
+                at: 0,
+            })),
             data_dir,
             address.to_owned(),
         ))

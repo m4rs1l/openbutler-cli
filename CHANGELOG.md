@@ -278,6 +278,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The remote hop is a WebSocket. `connect` and every later command upgrade to
+  the stored backend at `/ws` and then speak exactly the frames the local pipe
+  speaks, so one protocol covers both doors and a browser-capable transport
+  needs no second contract. The fake host in the connect suite upgrades too,
+  which pins the client half of the same frames.
+
 - The client refuses to send an action the protocol's catalog does not
   declare. A typo now fails at the call site with the name in the sentence,
   instead of costing a dial and an "unknown action" answer from the host.

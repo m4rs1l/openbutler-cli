@@ -24,3 +24,5 @@ serde_json = { version = "1.0.154", features = ["preserve_order"] }
 thiserror = "2.0.21"
 tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "net", "io-util", "time", "signal"] }
 uuid = { version = "1.29.3", features = ["v4"] }
+futures-util = "0.3"
+tokio-tungstenite = "0.29"
