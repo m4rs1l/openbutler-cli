@@ -17,8 +17,12 @@ jobs:
   # to publish while fmt, clippy or the suite is red — a defect that ships once
   # must not need a second release to leave.
   verify:
-    name: verify
-    runs-on: ubuntu-latest
+    name: verify (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - run: rustup show
