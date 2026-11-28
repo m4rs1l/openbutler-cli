@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.8] - 2026-11-28
+
 ### Removed
 
 - `openbutler web` and the `--web` flag on `daemon start` / `daemon install`.
