@@ -675,9 +675,10 @@ pub fn install(web: bool) -> Result<String, CliError> {
     crate::autostart::install(&entry)
 }
 
-/// Removes the login entry. Idempotent: nothing to remove is still success.
+/// Removes the login entry. Idempotent: nothing to remove is still success,
+/// and an entry that belongs to another command is left alone.
 pub fn uninstall() -> Result<String, CliError> {
-    crate::autostart::uninstall()
+    crate::autostart::uninstall(&resolve_daemon_exe()?)
 }
 
 #[cfg(test)]

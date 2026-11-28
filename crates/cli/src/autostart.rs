@@ -120,13 +120,21 @@ pub mod windows {
         value.contains(&program.display().to_string())
     }
 
-    pub fn remove() -> Result<(), String> {
-        match run(&delete_arguments()) {
-            Ok(()) => Ok(()),
-            // Nothing to delete is success: uninstall is idempotent, and
-            // reg.exe reports a missing value as an error.
-            Err(error) if missing_entry(&error) => Ok(()),
-            Err(error) => Err(error),
+    /// Removes the entry, but only one that is ours. Returns whether a value
+    /// was there, so the caller can say what happened.
+    pub fn remove(program: &std::path::Path) -> Result<bool, String> {
+        match read() {
+            None => Ok(false),
+            Some(existing) if !belongs_to(&existing, program) => Err(format!(
+                "The Run value \"{VALUE}\" belongs to another command ({existing}); OpenButler left it unchanged."
+            )),
+            Some(_) => match run(&delete_arguments()) {
+                // A value that vanished between the read and the delete is
+                // already gone: uninstall stays idempotent.
+                Err(error) if missing_entry(&error) => Ok(true),
+                Err(error) => Err(error),
+                Ok(()) => Ok(true),
+            },
         }
     }
 
@@ -191,17 +199,17 @@ pub mod unix {
         systemctl(&["enable", "--now", UNIT])
     }
 
-    pub fn remove(config_dir: &Path) -> Result<(), String> {
+    pub fn remove(config_dir: &Path) -> Result<bool, String> {
         // A host that is not enabled is not an error: uninstall must be
         // idempotent.
         let _ = systemctl(&["disable", "--now", UNIT]);
-        match std::fs::remove_file(unit_path(config_dir)) {
-            Ok(()) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        let removed = match std::fs::remove_file(unit_path(config_dir)) {
+            Ok(()) => true,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
             Err(error) => return Err(error.to_string()),
-        }
+        };
         let _ = systemctl(&["daemon-reload"]);
-        Ok(())
+        Ok(removed)
     }
 
     fn systemctl(arguments: &[&str]) -> Result<(), String> {
@@ -261,12 +269,30 @@ pub fn removed_sentence() -> String {
     }
 }
 
-/// Removes the login entry, whether or not it was there.
-pub fn uninstall() -> Result<String, CliError> {
+/// Whether a login entry this product owns is present.
+pub fn installed(program: &std::path::Path) -> bool {
     #[cfg(windows)]
-    windows::remove().map_err(CliError::Answer)?;
+    {
+        windows::read()
+            .map(|value| windows::belongs_to(&value, program))
+            .unwrap_or(false)
+    }
     #[cfg(unix)]
     {
+        let _ = program;
+        config_dir()
+            .map(|dir| unix::unit_path(&dir).is_file())
+            .unwrap_or(false)
+    }
+}
+
+/// Removes the login entry, whether or not it was there.
+pub fn uninstall(program: &std::path::Path) -> Result<String, CliError> {
+    #[cfg(windows)]
+    windows::remove(program).map_err(CliError::Answer)?;
+    #[cfg(unix)]
+    {
+        let _ = program;
         let config_dir = config_dir()?;
         unix::remove(&config_dir).map_err(CliError::Answer)?;
     }

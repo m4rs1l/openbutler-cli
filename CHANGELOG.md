@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `openbutler uninstall [--purge] [--dry-run] [--force]`: removes the program
+  the installer laid down, its login entry and its PATH line. The data
+  directory is kept unless `--purge`; a directory without the installer marker
+  is never deleted, a login entry that belongs to another command is left
+  alone, and a binary that holds its own directory open is removed by a watcher
+  once the process exits.
+
 - `openbutler daemon install [--web]` and `daemon uninstall`: the per-user
   login entry that starts the host at sign-in - the Run key on Windows, a
   systemd user unit on Linux. The entry runs `openbutlerd`, never the client,

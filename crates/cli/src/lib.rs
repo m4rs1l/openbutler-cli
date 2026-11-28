@@ -11,6 +11,7 @@ pub mod data_dir;
 pub mod remote;
 pub mod tui;
 pub mod ui;
+pub mod uninstall;
 
 use commands::run;
 use std::io::Write;
@@ -113,6 +114,18 @@ pub enum Command {
     Stop,
     /// Restart the background host (same as `openbutler daemon restart`).
     Restart,
+    /// Remove the installed program; the data stays unless --purge.
+    Uninstall {
+        /// Remove the data directory too: memories, sessions, settings.
+        #[arg(long)]
+        purge: bool,
+        /// Report what would go, change nothing.
+        #[arg(long)]
+        dry_run: bool,
+        /// Skip the confirmation prompt (a terminal is required without it).
+        #[arg(long)]
+        force: bool,
+    },
     /// List recent auto-review denials; `approve <n>` retries one exactly once.
     Approve {
         /// The number `openbutler approve` printed.
@@ -348,6 +361,21 @@ pub async fn execute(command: Command, data_dir: &std::path::Path) -> Result<Str
             DaemonCommand::Uninstall => commands::daemon::uninstall(),
         },
         Command::Stop => commands::daemon::stop(data_dir).await,
+        Command::Uninstall {
+            purge,
+            dry_run,
+            force,
+        } => {
+            uninstall::run(
+                data_dir,
+                uninstall::Options {
+                    purge,
+                    dry_run,
+                    force,
+                },
+            )
+            .await
+        }
         Command::Approve { index } => commands::approve::run(data_dir, index).await,
         Command::ListModels {
             provider,
@@ -609,6 +637,39 @@ mod install_tests {
                 command: Some(DaemonCommand::Uninstall),
             }) => {}
             _ => panic!("expected daemon uninstall"),
+        }
+    }
+}
+
+#[cfg(test)]
+mod uninstall_command_tests {
+    use super::{Cli, Command};
+    use clap::Parser;
+
+    fn parse(arguments: &[&str]) -> Cli {
+        match Cli::try_parse_from(arguments) {
+            Ok(cli) => cli,
+            Err(error) => panic!("parse failed: {error}"),
+        }
+    }
+
+    #[test]
+    fn uninstall_takes_its_three_flags() {
+        match parse(&["openbutler", "uninstall", "--purge", "--dry-run", "--force"]).command {
+            Some(Command::Uninstall {
+                purge: true,
+                dry_run: true,
+                force: true,
+            }) => {}
+            _ => panic!("expected the three flags"),
+        }
+        match parse(&["openbutler", "uninstall"]).command {
+            Some(Command::Uninstall {
+                purge: false,
+                dry_run: false,
+                force: false,
+            }) => {}
+            _ => panic!("expected bare uninstall"),
         }
     }
 }

@@ -81,6 +81,7 @@ openbutler connect --forget                   # back to the local host
 | `tui` | Interactive session |
 | `daemon start\|stop\|restart\|status\|run` | This machine's host process |
 | `daemon install\|uninstall` | The login entry that starts the host at sign-in |
+| `uninstall [--purge]` | Remove the program; the data stays unless `--purge` |
 | `logs` | The machine log's tail (`--level`, `--event`, `--json`) |
 | `usage` | Recorded token use and cost |
 | `events`, `actions` | The durable ledgers, with `retry` and `prune` |
