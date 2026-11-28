@@ -32,7 +32,6 @@ pub struct Options {
 pub struct Targets {
     pub install_dir: Option<PathBuf>,
     pub bin_dir: Option<PathBuf>,
-    pub data_dir: PathBuf,
     pub autostart: bool,
 }
 
@@ -57,6 +56,20 @@ pub fn install_dir(exe: &Path) -> Option<PathBuf> {
         return None;
     }
     Some(root.to_path_buf())
+}
+
+/// Which binary the login entry runs: the host when it can be resolved beside
+/// this client, the client itself otherwise. Never the client when the host is
+/// there - an entry that names the wrong binary is an entry uninstall cannot
+/// recognise.
+pub fn host_binary(resolved: Option<PathBuf>, exe: &Path) -> PathBuf {
+    resolved.unwrap_or_else(|| exe.to_path_buf())
+}
+
+/// Whether an uninstall must stop here: a running host that did not stop would
+/// leave its data directory under a live writer.
+pub fn must_abort(host_running: bool, stopped: bool) -> bool {
+    host_running && !stopped
 }
 
 /// Removes the installer's PATH line from a profile, leaving every other byte
@@ -125,16 +138,12 @@ pub async fn run(data_dir: &Path, options: Options) -> Result<String, CliError> 
     let exe = std::env::current_exe().map_err(|error| CliError::Answer(error.to_string()))?;
     let install_dir = install_dir(&exe);
     let bin_dir = install_dir.as_ref().map(|root| root.join("bin"));
-    let host_program = bin_dir
-        .as_ref()
-        .map(|bin| bin.join(exe.file_name().unwrap_or_default()))
-        .unwrap_or_else(|| exe.clone());
+    let host_program = host_binary(crate::commands::daemon::resolve_daemon_exe().ok(), &exe);
     let autostart = crate::autostart::installed(&host_program);
     let host_running = crate::commands::daemon::status(data_dir).await.is_ok();
     let targets = Targets {
         install_dir: install_dir.clone(),
         bin_dir,
-        data_dir: data_dir.to_path_buf(),
         autostart,
     };
 
@@ -180,7 +189,17 @@ pub async fn run(data_dir: &Path, options: Options) -> Result<String, CliError> 
         confirm(options.purge)?;
     }
 
-    if host_running && crate::commands::daemon::stop(data_dir).await.is_ok() {
+    if host_running {
+        let stopped = crate::commands::daemon::stop(data_dir).await;
+        if must_abort(host_running, stopped.is_ok()) {
+            let reason = match &stopped {
+                Err(error) => error.to_string(),
+                Ok(text) => text.clone(),
+            };
+            return Err(CliError::Answer(format!(
+                "The background host is still running, so nothing was removed: {reason}"
+            )));
+        }
         lines.push(ui::success("Background host stopped."));
     }
     if autostart {
@@ -365,6 +384,25 @@ fn deferred_removal(directory: &Path) -> Result<(), CliError> {
 mod tests {
     use super::{install_dir, remove_path_entry, strip_profile_line};
     use std::path::Path;
+
+    #[test]
+    fn the_login_entry_runs_the_host_when_it_is_there() {
+        use super::{host_binary, must_abort};
+        let client = Path::new("C:/prefix/bin/openbutler.exe");
+        assert_eq!(
+            host_binary(
+                Some(Path::new("C:/prefix/bin/openbutlerd.exe").to_path_buf()),
+                client
+            ),
+            Path::new("C:/prefix/bin/openbutlerd.exe")
+        );
+        // No host beside the client: the client path is all there is.
+        assert_eq!(host_binary(None, client), client);
+        // A host that did not stop blocks the removal; anything else does not.
+        assert!(must_abort(true, false));
+        assert!(!must_abort(true, true));
+        assert!(!must_abort(false, false));
+    }
 
     #[test]
     fn a_build_tree_is_not_an_installed_program() {

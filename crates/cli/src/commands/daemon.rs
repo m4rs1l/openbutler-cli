@@ -568,7 +568,7 @@ fn log_tail(path: &Path, offset: u64) -> String {
 
 /// The daemon executable: `OPENBUTLER_DAEMON` first (dev and tests),
 /// then the install layout where both binaries sit side by side.
-fn resolve_daemon_exe() -> Result<std::path::PathBuf, CliError> {
+pub(crate) fn resolve_daemon_exe() -> Result<std::path::PathBuf, CliError> {
     if let Some(over) = std::env::var_os("OPENBUTLER_DAEMON") {
         let path = std::path::PathBuf::from(over);
         if path.is_file() {
