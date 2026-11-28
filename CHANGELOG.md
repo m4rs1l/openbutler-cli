@@ -92,10 +92,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `openbutler skills [--workspace PATH]` — the Agent Skill table (or the
   source's empty screen naming every scanned root) from the daemon's
   `skills.list`; discovery and frontmatter rules live in the host.
-- `openbutler workspace default [path]` — shows or saves the workspace
-  bare launches use, through the daemon
-  (`settings.set-default-workspace`); the path canonicalizes on the host,
-  and the CLI never reads or writes settings.
+
 - `openbutler about` — version, shell, runtime and the configuration
   paths from the daemon's `about.report` (the CLI prints the answer and
   adds nothing but its own version).
@@ -162,7 +159,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   halves pinned end to end against the fake daemon (payload + rendered
   lines).
 - `openbutler config` — the manager screen, rendered entirely from the
-  daemon's `config.report`: MCP servers, default workspace, approval-mode
+  daemon's `config.report`: MCP servers, approval-mode
   label, the provider table (stored order, kind, keys, tool counts, the
   default row's model), the default pair with `(from usage)`, the
   reasoning line and readiness with the source's sentences. Divergences
@@ -259,6 +256,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (twenty-three e2e total): the exact render with an offset-rollover
   row, the empty sentence, the session/model scope, and the `--json`
   envelope shape.
+
+### Removed
+
+- `openbutler workspace default [path]`: the default workspace is gone. A
+  session that names no directory works in the daemon's per-session scratch,
+  so there is nothing to choose.
 
 ### Changed
 

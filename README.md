@@ -89,7 +89,7 @@ openbutler connect --forget                   # back to the local host
 | `setup` | First-run wizard (interactive) |
 | `admin create <username>` | The account that signs devices in |
 | `connect <host:port> <username>` | Sign this client in to a host, `--forget` to drop it |
-| `workspace default [path]` | The workspace bare launches use |
+
 | `skills`, `schedule`, `mcp`, `keys`, `permissions`, `web`, `about` | Their own surfaces |
 
 Two rules decide where a command goes:

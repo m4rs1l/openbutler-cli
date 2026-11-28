@@ -194,14 +194,10 @@ pub enum Command {
     Config,
     /// Version, shell, runtime and the configuration paths.
     About,
-    /// Choose the workspace bare launches use.
-    Workspace {
-        #[command(subcommand)]
-        command: WorkspaceCommand,
-    },
+
     /// List the Agent Skills this machine offers.
     Skills {
-        /// Scan this workspace instead of the stored default.
+        /// Scan this directory instead of the custodian scope.
         #[arg(long, value_name = "PATH")]
         workspace: Option<String>,
     },
@@ -272,16 +268,6 @@ pub enum KeysCommand {
     Remove {
         /// The provider id.
         provider: String,
-    },
-}
-
-/// `openbutler workspace` subcommands.
-#[derive(Debug, Clone, clap::Subcommand)]
-pub enum WorkspaceCommand {
-    /// Choose the workspace bare launches use (omit the path to show it).
-    Default {
-        /// The directory to use.
-        path: Option<String>,
     },
 }
 
@@ -405,9 +391,7 @@ pub async fn execute(command: Command, data_dir: &std::path::Path) -> Result<Str
         Command::Mcp { action } => commands::mcp::run(data_dir, action).await,
         Command::Config => commands::config::run(data_dir).await,
         Command::About => commands::about::run(data_dir).await,
-        Command::Workspace {
-            command: WorkspaceCommand::Default { path },
-        } => commands::workspace::run(data_dir, path).await,
+
         Command::Skills { workspace } => commands::skills::run(data_dir, workspace).await,
         Command::Keys { command } => {
             let request = match command {

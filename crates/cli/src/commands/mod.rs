@@ -22,7 +22,6 @@ pub mod skills;
 pub mod status;
 pub mod usage;
 pub mod web;
-pub mod workspace;
 
 use std::path::Path;
 
