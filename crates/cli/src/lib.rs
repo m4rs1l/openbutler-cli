@@ -216,7 +216,6 @@ pub enum Command {
     Skills,
 
     /// The browser surface this host serves.
-    Web,
     /// The global MCP server manager.
     Mcp {
         /// list | add | remove (bare: the interactive menu).
@@ -313,16 +312,9 @@ pub enum DaemonCommand {
         /// Refuse the saved listener for this run and clear it.
         #[arg(long)]
         no_listen: bool,
-        /// Also serve the browser UI (the pair URL lands in `openbutler web`).
-        #[arg(long)]
-        web: bool,
     },
     /// Register the login entry that starts the host at sign-in.
-    Install {
-        /// Start the host with the browser UI as well.
-        #[arg(long)]
-        web: bool,
-    },
+    Install,
     /// Remove the login entry.
     Uninstall,
 }
@@ -346,12 +338,10 @@ pub async fn execute(command: Command, data_dir: &std::path::Path) -> Result<Str
                     .await
                     .map(|_| String::new())
             }
-            DaemonCommand::Start {
-                listen,
-                no_listen,
-                web,
-            } => commands::daemon::start(data_dir, listen, no_listen, web).await,
-            DaemonCommand::Install { web } => commands::daemon::install(web),
+            DaemonCommand::Start { listen, no_listen } => {
+                commands::daemon::start(data_dir, listen, no_listen).await
+            }
+            DaemonCommand::Install => commands::daemon::install(),
             DaemonCommand::Uninstall => commands::daemon::uninstall(),
         },
         Command::Stop => commands::daemon::stop(data_dir).await,
@@ -395,7 +385,6 @@ pub async fn execute(command: Command, data_dir: &std::path::Path) -> Result<Str
         // gets the refusal sentence and no prompts.
         Command::Setup => commands::setup::run(data_dir).await.map(|()| String::new()),
 
-        Command::Web => commands::web::run(data_dir).await,
         Command::Mcp { action } => commands::mcp::run(data_dir, action).await,
         Command::Config => commands::config::run(data_dir).await,
         Command::About => commands::about::run(data_dir).await,
@@ -607,16 +596,16 @@ mod install_tests {
     }
 
     #[test]
-    fn daemon_install_parses_with_and_without_the_web_flag() {
-        match parse(&["openbutler", "daemon", "install", "--web"]).command {
+    fn daemon_install_parses() {
+        match parse(&["openbutler", "daemon", "install"]).command {
             Some(Command::Daemon {
-                command: Some(DaemonCommand::Install { web: true }),
+                command: Some(DaemonCommand::Install),
             }) => {}
-            _ => panic!("expected daemon install --web"),
+            _ => panic!("expected daemon install"),
         }
         match parse(&["openbutler", "daemon", "install"]).command {
             Some(Command::Daemon {
-                command: Some(DaemonCommand::Install { web: false }),
+                command: Some(DaemonCommand::Install),
             }) => {}
             _ => panic!("expected daemon install"),
         }

@@ -129,7 +129,6 @@ async fn status_renders_the_host_report_line_by_line() {
     let responder: Responder = Arc::new(|request| {
         assert_eq!(request.action, "status");
         let status = DaemonStatus {
-            web: None,
             pid: 4242,
             started_at: "2026-11-22T01:02:03Z".to_owned(),
             connected_clients: 1,
@@ -884,7 +883,6 @@ fn status_fixture(pid: u32) -> Value {
         schedules: None,
         unresponsive: None,
         entry: None,
-        web: None,
         build_id: None,
         lines: vec![
             openbutler_protocol::ScreenLine::plain(format!("pid:           {pid}")),
@@ -988,7 +986,6 @@ async fn daemon_start_reports_the_running_host_without_spawning() {
         Path::new("definitely-unused.exe"),
         None,
         false,
-        false,
     )
     .await
     .unwrap();
@@ -1018,28 +1015,14 @@ fn failing_exe() -> PathBuf {
 
 /// A real executable that echoes its arguments, so a flag handed to the
 /// child shows up in the log the failure quotes.
-fn echoing_exe() -> PathBuf {
-    #[cfg(windows)]
-    {
-        std::env::var_os("WINDIR")
-            .map(|windir| PathBuf::from(windir).join("System32").join("findstr.exe"))
-            .expect("WINDIR is set on Windows")
-    }
-    #[cfg(not(windows))]
-    {
-        PathBuf::from("/bin/echo")
-    }
-}
-
 #[tokio::test]
 async fn daemon_start_diagnoses_a_child_that_died_before_ready() {
     let dir = unique_dir("daemon-start-dead");
     // The stand-in fails at once, so the diagnosis must quote the log and
     // name the exit.
-    let error =
-        openbutler_cli::commands::daemon::start_with(&dir, &failing_exe(), None, false, false)
-            .await
-            .expect_err("a dead child must fail the start");
+    let error = openbutler_cli::commands::daemon::start_with(&dir, &failing_exe(), None, false)
+        .await
+        .expect_err("a dead child must fail the start");
     let message = error.to_string();
     assert!(
         message.starts_with("The host exited before becoming ready (exit code "),
@@ -1055,7 +1038,7 @@ async fn daemon_start_diagnoses_a_child_that_died_before_ready() {
 async fn daemon_start_reports_a_missing_daemon_executable() {
     let dir = unique_dir("daemon-start-missing");
     let missing = dir.join("no-such-daemon.exe");
-    let error = openbutler_cli::commands::daemon::start_with(&dir, &missing, None, false, false)
+    let error = openbutler_cli::commands::daemon::start_with(&dir, &missing, None, false)
         .await
         .expect_err("a missing executable must fail the start");
     let message = error.to_string();
@@ -1064,33 +1047,6 @@ async fn daemon_start_reports_a_missing_daemon_executable() {
         "{message}"
     );
 }
-
-/// `daemon start --web` hands `--web` to the spawned host and a plain start
-/// does not. `findstr run` stands in for the daemon: it treats every extra
-/// argument as a file to open, so `--web` surfaces in the machine log the
-/// start failure quotes, while the plain argv reads the null stdin silently.
-#[tokio::test]
-async fn daemon_start_web_passes_the_flag_to_the_child() {
-    let findstr = echoing_exe();
-
-    let with_web = unique_dir("daemon-start-web");
-    let message =
-        openbutler_cli::commands::daemon::start_with(&with_web, &findstr, None, false, true)
-            .await
-            .expect_err("the stand-in exits before ready")
-            .to_string();
-    assert!(message.contains("--web"), "{message}");
-
-    let plain = unique_dir("daemon-start-plain");
-    let message =
-        openbutler_cli::commands::daemon::start_with(&plain, &findstr, None, false, false)
-            .await
-            .expect_err("the stand-in exits before ready")
-            .to_string();
-    assert!(!message.contains("--web"), "{message}");
-}
-
-// ------------------------------------------------- machine log (S3)
 
 #[tokio::test]
 async fn logs_prints_the_host_lines() {
@@ -1520,7 +1476,6 @@ async fn daemon_start_persists_the_listener_through_the_daemon() {
         Path::new("definitely-unused.exe"),
         Some("100.64.0.5:45280".to_owned()),
         false,
-        false,
     )
     .await
     .unwrap();
@@ -1566,7 +1521,6 @@ async fn daemon_start_no_listen_clears_the_preference() {
         Path::new("definitely-unused.exe"),
         None,
         true,
-        false,
     )
     .await
     .unwrap();

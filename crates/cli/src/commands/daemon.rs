@@ -99,7 +99,7 @@ pub async fn restart_with(data_dir: &Path, exe: &Path) -> Result<String, CliErro
     stop_for_restart(data_dir).await?;
     // A restart keeps the saved listener and records nothing new: the boot
     // binds the stored preference, exactly like a flagless start.
-    let started = start_status(data_dir, exe, None, false, false).await?;
+    let started = start_status(data_dir, exe, None, false).await?;
     Ok(render_restarted(started.status.pid))
 }
 
@@ -204,16 +204,15 @@ async fn stop_for_restart(data_dir: &Path) -> Result<(), CliError> {
 /// `defaultModelReady` guard is a settings/key/catalog computation that
 /// belongs daemon-side (the owner's backend-owned rule) and this
 /// build's status carries no model field yet, so start does not
-/// pre-check; the `--listen`/`--web` flags and their settings writes
-/// land with their own slices.
+/// pre-check; the `--listen` flag and its settings write land with their
+/// own slices.
 pub async fn start(
     data_dir: &Path,
     listen: Option<String>,
     no_listen: bool,
-    web: bool,
 ) -> Result<String, CliError> {
     let exe = resolve_daemon_exe()?;
-    start_with(data_dir, &exe, listen, no_listen, web).await
+    start_with(data_dir, &exe, listen, no_listen).await
 }
 
 /// Start with an explicit executable — the test seam for the spawn
@@ -223,9 +222,8 @@ pub async fn start_with(
     exe: &Path,
     listen: Option<String>,
     no_listen: bool,
-    web: bool,
 ) -> Result<String, CliError> {
-    let started = start_status(data_dir, exe, listen, no_listen, web).await?;
+    let started = start_status(data_dir, exe, listen, no_listen).await?;
     Ok(render_started(
         &started.status,
         started.saved.as_deref(),
@@ -247,7 +245,6 @@ async fn start_status(
     exe: &Path,
     listen: Option<String>,
     no_listen: bool,
-    web: bool,
 ) -> Result<Started, CliError> {
     // One connection carries the whole start: the probe and the write.
     // The source could probe and write without a host (its files were the
@@ -275,7 +272,7 @@ async fn start_status(
 
     let mut attempt_index = 0usize;
     loop {
-        match spawn_and_wait(data_dir, exe, listen.as_deref(), no_listen, web).await {
+        match spawn_and_wait(data_dir, exe, listen.as_deref(), no_listen).await {
             Ok(()) => break,
             Err(failure) => {
                 // The source retries only a transient failure while a
@@ -385,7 +382,6 @@ async fn spawn_and_wait(
     exe: &Path,
     listen: Option<&str>,
     no_listen: bool,
-    web: bool,
 ) -> Result<(), StartupFailure> {
     use std::process::Stdio;
 
@@ -410,7 +406,7 @@ async fn spawn_and_wait(
         retryable: false,
     })?;
 
-    let mut command = background_command(data_dir, exe, listen, no_listen, web);
+    let mut command = background_command(data_dir, exe, listen, no_listen);
     command
         .current_dir(data_dir)
         .stdin(Stdio::null())
@@ -484,7 +480,6 @@ fn background_command(
     exe: &Path,
     listen: Option<&str>,
     no_listen: bool,
-    web: bool,
 ) -> std::process::Command {
     let mut command = std::process::Command::new(exe);
     command.arg("run").env("OPENBUTLER_DATA_DIR", data_dir);
@@ -495,9 +490,6 @@ fn background_command(
         command.arg("--listen").arg(spec);
     } else if no_listen {
         command.arg("--no-listen");
-    }
-    if web {
-        command.arg("--web");
     }
     command
 }
@@ -684,8 +676,8 @@ async fn status_pid(data_dir: &Path) -> Result<u32, CliError> {
 ///
 /// The entry runs `openbutlerd`, never this client: a login must not open a
 /// terminal window, and the host is the thing that outlives the session.
-pub fn install(web: bool) -> Result<String, CliError> {
-    let entry = crate::autostart::Entry::new(resolve_daemon_exe()?, web);
+pub fn install() -> Result<String, CliError> {
+    let entry = crate::autostart::Entry::new(resolve_daemon_exe()?);
     crate::autostart::install(&entry)
 }
 
@@ -707,7 +699,7 @@ mod tests {
 
         let dir = std::path::Path::new("C:\\fixture\\data");
         let exe = std::path::Path::new("openbutlerd.exe");
-        let command = super::background_command(dir, exe, Some("127.0.0.1:7777"), false, true);
+        let command = super::background_command(dir, exe, Some("127.0.0.1:7777"), false);
         let envs: Vec<(&OsStr, Option<&OsStr>)> = command.get_envs().collect();
         assert!(
             envs.iter().any(|(key, value)| *key == "OPENBUTLER_DATA_DIR"
@@ -718,9 +710,9 @@ mod tests {
             .get_args()
             .map(|arg| arg.to_string_lossy().into_owned())
             .collect();
-        assert_eq!(args, vec!["run", "--listen", "127.0.0.1:7777", "--web"]);
+        assert_eq!(args, vec!["run", "--listen", "127.0.0.1:7777"]);
 
-        let cleared = super::background_command(dir, exe, None, true, false);
+        let cleared = super::background_command(dir, exe, None, true);
         let args: Vec<String> = cleared
             .get_args()
             .map(|arg| arg.to_string_lossy().into_owned())

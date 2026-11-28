@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- `openbutler web` and the `--web` flag on `daemon start` / `daemon install`.
+  The daemon no longer serves a browser surface, so a client-side switch for
+  it had nothing to switch on: the login entry now starts the host alone, and
+  `daemon install` takes no argument. The protocol pin moves to the revision
+  that drops the web status.
+
 ### Added
 
 - `openbutler sessions search "<keywords>"`: asks the host to search the

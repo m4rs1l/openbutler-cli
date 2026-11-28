@@ -21,7 +21,6 @@ pub mod setup;
 pub mod skills;
 pub mod status;
 pub mod usage;
-pub mod web;
 
 use std::path::Path;
 

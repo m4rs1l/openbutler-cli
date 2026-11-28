@@ -21,14 +21,10 @@ pub struct Entry {
 }
 
 impl Entry {
-    pub fn new(program: PathBuf, web: bool) -> Self {
+    pub fn new(program: PathBuf) -> Self {
         Self {
             program,
-            arguments: if web {
-                vec!["--web".to_owned()]
-            } else {
-                Vec::new()
-            },
+            arguments: Vec::new(),
         }
     }
 
@@ -319,36 +315,35 @@ mod tests {
     use super::Entry;
     use std::path::PathBuf;
 
-    fn entry(web: bool) -> Entry {
-        Entry::new(
-            PathBuf::from("C:/Program Files/OpenButler/bin/openbutlerd.exe"),
-            web,
-        )
+    fn entry() -> Entry {
+        Entry::new(PathBuf::from(
+            "C:/Program Files/OpenButler/bin/openbutlerd.exe",
+        ))
     }
 
     #[test]
     fn the_command_line_quotes_the_program_and_keeps_its_flags() {
         assert_eq!(
-            entry(false).command_line(),
+            entry().command_line(),
             "\"C:/Program Files/OpenButler/bin/openbutlerd.exe\""
         );
         assert_eq!(
-            entry(true).command_line(),
-            "\"C:/Program Files/OpenButler/bin/openbutlerd.exe\" --web"
+            entry().command_line(),
+            "\"C:/Program Files/OpenButler/bin/openbutlerd.exe\""
         );
     }
 
     #[cfg(windows)]
     #[test]
     fn the_run_key_entry_names_the_value_and_carries_the_command() {
-        let arguments = super::windows::write_arguments(&entry(true));
+        let arguments = super::windows::write_arguments(&entry());
         assert_eq!(arguments[0], "add");
         assert_eq!(arguments[1], super::windows::RUN_KEY);
         assert_eq!(arguments[2], "/v");
         assert_eq!(arguments[3], "OpenButler");
         // The data value is the quoted command line, flags included.
         assert_eq!(arguments[6], "/d");
-        assert_eq!(arguments[7], entry(true).command_line());
+        assert_eq!(arguments[7], entry().command_line());
         // Overwrite in place: installing twice must not fail.
         assert_eq!(arguments.last().map(String::as_str), Some("/f"));
     }
@@ -363,7 +358,7 @@ mod tests {
             Path::new("C:/build/bin/openbutlerd.exe")
         ));
         assert!(super::windows::belongs_to(
-            "\"C:\\build\\bin\\openbutlerd.exe\" --web",
+            "\"C:\\build\\bin\\openbutlerd.exe\"",
             Path::new(r"C:\build\bin\openbutlerd.exe")
         ));
     }
@@ -371,10 +366,10 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn the_query_parser_reads_the_value_line() {
-        let stdout = "\r\nHKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\r\n    OpenButler    REG_SZ    \"C:\\bin\\openbutlerd.exe\" --web\r\n\r\n";
+        let stdout = "\r\nHKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\r\n    OpenButler    REG_SZ    \"C:\\bin\\openbutlerd.exe\"\r\n\r\n";
         assert_eq!(
             super::windows::parse_query(stdout).as_deref(),
-            Some("\"C:\\bin\\openbutlerd.exe\" --web")
+            Some("\"C:\\bin\\openbutlerd.exe\"")
         );
         assert_eq!(super::windows::parse_query("no value here"), None);
     }
@@ -401,9 +396,9 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn the_unit_runs_the_host_with_its_flags_and_restarts_on_failure() {
-        let text = super::unix::unit(&entry(true));
+        let text = super::unix::unit(&entry());
         assert!(
-            text.contains("ExecStart=\"C:/Program Files/OpenButler/bin/openbutlerd.exe\" --web"),
+            text.contains("ExecStart=\"C:/Program Files/OpenButler/bin/openbutlerd.exe\""),
             "{text}"
         );
         assert!(text.contains("Restart=on-failure"), "{text}");
@@ -430,7 +425,7 @@ mod tests {
     #[test]
     fn the_unit_lands_under_the_config_directory() {
         let dir = std::env::temp_dir().join(format!("ob-unit-{}", std::process::id()));
-        let path = match super::unix::write_unit(&dir, &entry(false)) {
+        let path = match super::unix::write_unit(&dir, &entry()) {
             Ok(path) => path,
             Err(error) => panic!("unit written: {error}"),
         };
