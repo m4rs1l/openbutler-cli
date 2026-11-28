@@ -84,8 +84,8 @@ pub async fn stop(data_dir: &Path) -> Result<String, CliError> {
 ///
 /// Source: the one restart flow shared by `openbutler restart` and
 /// `openbutler daemon restart` (cli-main.ts L1669-1691, daemon.ts L414),
-/// read 2026-11-24. Divergence, deliberate: this build has no separate web
-/// process (the HTTP server lives inside the daemon), so the source's
+/// read 2026-11-24. Divergence, deliberate: this build has no browser surface
+/// at all - the daemon serves an API, not a UI - so the source's
 /// browser-server lines have nothing to report.
 pub async fn restart(data_dir: &Path) -> Result<String, CliError> {
     let exe = resolve_daemon_exe()?;
