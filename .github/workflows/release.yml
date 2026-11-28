@@ -108,6 +108,7 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           path: dist
@@ -117,12 +118,28 @@ jobs:
           cd dist
           sha256sum *.tar.gz *.zip > SHA256SUMS
           cat SHA256SUMS
+      - name: release notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          sh scripts/release-notes.sh "$version" CHANGELOG.md notes.md
+          previous="$(gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --limit 1 --json tagName --jq '.[0].tagName // empty' || true)"
+          if [ -n "$previous" ]; then
+            printf '\n**Full Changelog**: https://github.com/%s/compare/%s...%s\n' \
+              "$GITHUB_REPOSITORY" "$previous" "$GITHUB_REF_NAME" >> notes.md
+          else
+            printf '\n**Full Changelog**: https://github.com/%s/commits/%s\n' \
+              "$GITHUB_REPOSITORY" "$GITHUB_REF_NAME" >> notes.md
+          fi
+          cat notes.md
+
       - name: publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          version="${GITHUB_REF_NAME#v}"
           gh release create "$GITHUB_REF_NAME" dist/* \
             --repo "$GITHUB_REPOSITORY" \
-            --title "openbutler $version" \
-            --generate-notes
+            --title "openbutler ${GITHUB_REF_NAME#v}" \
+            --notes-file notes.md
